@@ -7,7 +7,7 @@ from scipy.optimize import least_squares
 from .rigid_connection import RigidConnection
 from .force import Force
 
-from .rod import CircularCrossSection, Simo1986
+from .rod import Simo1986
 from .visualization import (
     VisualArUco,
     VisualRodBody,
@@ -127,11 +127,15 @@ class __ModelBase(ABC):
         self.system = System()
 
         # ---- rod ----
-        cross_section = CircularCrossSection(param.r_rod)
-        EA = param.E_A * cross_section.area
-        EI = param.E_I * cross_section.second_moment[1, 1]
-        GA = param.G_A * cross_section.area
-        GJ = param.G_J * cross_section.second_moment[0, 0]
+        radius = param.r_rod
+        area = np.pi * radius**2
+        # https://en.wikipedia.org/wiki/List_of_second_moments_of_area
+        second_moment = np.diag([2, 1, 1]) / 4 * np.pi * radius**4
+        
+        EA = param.E_A * area
+        EI = param.E_I * second_moment[1, 1]
+        GA = param.G_A * area
+        GJ = param.G_J * second_moment[0, 0]
         material_model = Simo1986(
             np.array([EA, GA, GA]),
             np.array([GJ, EI, EI]),
@@ -165,9 +169,7 @@ class __ModelBase(ABC):
             A_IB0=self.param.rod_A_IB0,
         )
 
-        density = m_rod / L0_rod / cross_section.area
         self.rod = Rod(
-            cross_section,
             material_model,
             param.poly_degree,
             Q=Q,
@@ -229,6 +231,7 @@ class __ModelBase(ABC):
         self.visual_twins.append(
             VisualRodBody(
                 self.rod,
+                param.r_rod,
                 param.visual_rod_body_nelement,
                 param.visual_rod_nonlinear_subdivision,
                 opacity=param.visual_rod_opacity,

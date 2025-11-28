@@ -69,7 +69,7 @@ class VisualTendon(_VisualTwinBase):
 
 class VisualRodBody(_VisualTwinBase):
     def __init__(
-        self, rod, nelement_visual=1, subdivision=3, color=(82, 108, 164), opacity=1
+        self, rod, radius, nelement_visual=1, subdivision=3, color=(82, 108, 164), opacity=1
     ):
         super().__init__(rod)
         self.rod = rod
@@ -138,9 +138,9 @@ class VisualRodBody(_VisualTwinBase):
         actor.GetProperty().SetOpacity(opacity)
         self.actors.append(actor)
         self.xis_visual = np.linspace(0.0, 1.0, self.nelement_visual + 1)
-        basis_r = np.array([rod.basis_functions_r(xi) for xi in self.xis_visual])
-        # TODO: the pre-evaluation of N and N_xi is only because slow basis_functions_r.
-        # need to speed up basis_functions_r in Cardillo,
+        basis_r = np.array([rod.eval_bases(xi) for xi in self.xis_visual])
+        # TODO: the pre-evaluation of N and N_xi is only because slow eval_bases.
+        # need to speed up eval_bases
         # then use r_OP and A_IB directly in update_state function
         self.Ns = basis_r[:, 0, :]
         self.N_xis = basis_r[:, 1, :]
@@ -148,12 +148,12 @@ class VisualRodBody(_VisualTwinBase):
         phis = np.linspace(0.0, 2.0 * np.pi, 3, endpoint=False)
         xys1 = (
             np.stack([np.zeros_like(phis), np.cos(phis), np.sin(phis)], axis=1)
-            * rod.cross_section.radius
+            * radius
         )
         # control points out of circle
         phis2 = phis + (np.pi / 3.0)
         xys2 = np.stack([np.zeros_like(phis), np.cos(phis2), np.sin(phis2)], axis=1) * (
-            2.0 * rod.cross_section.radius
+            2.0 * radius
         )
         self.control_pts_circle = np.concatenate([xys1, xys2], axis=0)
 

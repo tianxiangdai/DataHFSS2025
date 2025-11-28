@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.special import roots_legendre
-
+from cachetools import cachedmethod, LRUCache
+from cachetools.keys import hashkey
 
 from .math import Log_SO3_quat, Exp_SO3_quat, T_SO3_quat, Exp_SO3_quat_p, T_SO3_quat_P
 
@@ -29,7 +30,6 @@ class Rod:
 
     def __init__(
         self,
-        cross_section,
         material_model,
         polynomial_degree,
         Q,
@@ -37,10 +37,7 @@ class Rod:
         q0=None,
         name=None,
     ):
-        self.cross_section = cross_section
         self.nelement = 1
-        # call base class for all export properties
-        # super().__init__(cross_section)
 
         # rod properties
         self.material_model = material_model
@@ -92,11 +89,6 @@ class Rod:
         self.L_dLs = [lagrange_basis_with_derivative(xs, i) for i in range(self.nnodes)]
 
         # shape functions and their first derivatives
-        self.basis_functions_r = lambda xi: np.array(
-            [(L_dL[0](xi), L_dL[1](xi)) for L_dL in self.L_dLs]
-        ).T
-        self.basis_functions_p = self.basis_functions_r
-
         self.N = np.array(
             [[self.L_dLs[i][0](xi) for i in range(self.nnodes)] for xi in self.qp]
         )
@@ -109,23 +101,22 @@ class Rod:
         self.Q = Q
         self.q0 = Q.copy() if q0 is None else q0
 
-        self.uDOF = []
-
-        # evaluate shape functions at specific xi
-        self.basis_functions = lambda xi: np.array([L_dL[0](xi) for L_dL in self.L_dLs])
-
         # unit quaternion constraints
         dim_g_S = 1
         self.nla_S = self.nnodes * dim_g_S
         self.nodalDOF_la_S = np.arange(self.nla_S).reshape(self.nnodes, dim_g_S)
         self.la_S0 = np.zeros(self.nla_S, dtype=float)
 
-        self.set_reference_strains(self.Q)
 
         # allocate memery
+        self._eval_bases_cache = LRUCache(maxsize=self.nquadrature + 20)
+        self._eval_cache = LRUCache(maxsize=self.nquadrature + 20)
+        self._deval_cache = LRUCache(maxsize=self.nquadrature + 20)
         self.__g_S_q = np.zeros((self.nla_S, self.nq))
         self.__h = np.zeros(self.nu, dtype=np.float64)
         self.__h_q = np.zeros((self.nu, self.nq), dtype=np.float64)
+        
+        self.set_reference_strains(self.Q)
 
     def set_reference_strains(self, Q):
         self.Q = Q.copy()
@@ -162,6 +153,16 @@ class Rod:
             self.J[i] = J
             self.B_Gamma0[i] = B_Gamma
             self.B_Kappa0[i] = B_Kappa
+
+
+    @cachedmethod(
+        lambda self: self._eval_bases_cache,
+        key=lambda self, xi: hashkey(xi),
+    )
+    def eval_bases(self, xi):
+        return np.array(
+            [(L_dL[0](xi), L_dL[1](xi)) for L_dL in self.L_dLs]
+        ).T
 
     @staticmethod
     def straight_configuration(
@@ -360,13 +361,13 @@ class Rod:
         return self.__h_q
 
     def r_OP(self, t, q, xi, B_r_CP=np.zeros(3, dtype=float)):
-        N, N_xi = self.basis_functions_r(xi)
+        N, N_xi = self.eval_bases(xi)
         r_OC, A_IB, _, _ = self._eval(q, xi, N, N_xi)
         return r_OC + A_IB @ B_r_CP
 
     def r_OP_q(self, t, q, xi, B_r_CP=np.zeros(3, dtype=float)):
         # evaluate required quantities
-        N, N_xi = self.basis_functions_r(xi)
+        N, N_xi = self.eval_bases(xi)
         (
             r_OC,
             A_IB,
@@ -381,37 +382,17 @@ class Rod:
         return r_OC_q + np.einsum("ijk,j->ik", A_IB_q, B_r_CP)
 
     def A_IB(self, t, q, xi):
-        N, N_xi = self.basis_functions_r(xi)
+        N, N_xi = self.eval_bases(xi)
         return self._eval(q, xi, N, N_xi)[1]
 
     def A_IB_q(self, t, q, xi):
         # return approx_fprime(q, lambda q: self.A_IB(t, q, xi))
-        N, N_xi = self.basis_functions_r(xi)
+        N, N_xi = self.eval_bases(xi)
         return self._deval(q, xi, N, N_xi)[5]
 
     def J_P(self, t, q, xi, B_r_CP=np.zeros(3, dtype=float)):
         # evaluate required nodal shape functions
-        N, _ = self.basis_functions_r(xi)
-
-        # transformation matrix
-        A_IB = self.A_IB(t, q, xi)
-
-        # skew symmetric matrix of B_r_CP
-        B_r_CP_tilde = ax2skew(B_r_CP)
-
-        # interpolate centerline and axis angle contributions
-        J_P = np.zeros((3, self.nu), dtype=q.dtype)
-        for node in range(self.nnodes):
-            J_P[:, self.nodalDOF_r_u[node]] += N[node] * eye3
-        r_CP_tilde = A_IB @ B_r_CP_tilde
-        for node in range(self.nnodes):
-            J_P[:, self.nodalDOF_p_u[node]] -= N[node] * r_CP_tilde
-
-        return J_P
-
-    def J_P(self, t, q, xi, B_r_CP=np.zeros(3, dtype=float)):
-        # evaluate required nodal shape functions
-        N, _ = self.basis_functions_r(xi)
+        N, _ = self.eval_bases(xi)
 
         # transformation matrix
         A_IB = self.A_IB(t, q, xi)
@@ -431,7 +412,7 @@ class Rod:
 
     def J_P_q(self, t, q, xi, B_r_CP=np.zeros(3, dtype=float)):
         # evaluate required nodal shape functions
-        N, _ = self.basis_functions_r(xi)
+        N, _ = self.eval_bases(xi)
 
         B_r_CP_tilde = ax2skew(B_r_CP)
         A_IB_q = self.A_IB_q(t, q, xi)
@@ -447,7 +428,7 @@ class Rod:
         return J_P_q
 
     def B_J_R(self, t, q, xi):
-        N_p, _ = self.basis_functions_p(xi)
+        N_p, _ = self.eval_bases(xi)
         B_J_R = np.zeros((3, self.nu), dtype=float)
         for node in range(self.nnodes):
             B_J_R[:, self.nodalDOF_p_u[node]] += N_p[node] * eye3
@@ -456,23 +437,21 @@ class Rod:
     def B_J_R_q(self, t, q, xi):
         return np.zeros((3, self.nu, self.nq), dtype=float)
 
+    @cachedmethod(
+        lambda self: self._eval_cache,
+        key=lambda self, qe, xi, N, N_xi: hashkey(*qe, xi),
+    )
     def _eval(self, q, xi, N, N_xi):
         # evaluate shape functions
         # N, N_xi = self.basis_functions_r(xi)
-
         # interpolate
-        r_OP = np.zeros(3, dtype=q.dtype)
-        r_OP_xi = np.zeros(3, dtype=q.dtype)
-        p = np.zeros(4, dtype=float)
-        p_xi = np.zeros(4, dtype=float)
-        for node in range(self.nnodes):
-            r_OP_node = q[self.nodalDOF_r[node]]
-            r_OP += N[node] * r_OP_node
-            r_OP_xi += N_xi[node] * r_OP_node
+        q_nodes_r = q[:self.nq_r].reshape(self.nnodes, 3, order="F")
+        r_OP = N @ q_nodes_r
+        r_OP_xi = N_xi @ q_nodes_r
 
-            p_node = q[self.nodalDOF_p[node]]
-            p += N[node] * p_node
-            p_xi += N_xi[node] * p_node
+        q_nodes_p = q[self.nq_r:].reshape(self.nnodes, 4, order="F")
+        p = N @ q_nodes_p
+        p_xi = N_xi @ q_nodes_p
 
         # transformation matrix
         A_IB = Exp_SO3_quat(p, normalize=True)
@@ -485,39 +464,41 @@ class Rod:
 
         return r_OP, A_IB, B_Gamma_bar, B_Kappa_bar
 
+    @cachedmethod(
+        lambda self: self._deval_cache,
+        key=lambda self, qe, xi, N, N_xi: hashkey(*qe, xi),
+    )
     def _deval(self, q, xi, N, N_xi):
         # evaluate shape functions
         # N, N_xi = self.basis_functions_r(xi)
 
         # interpolate
-        r_OP = np.zeros(3, dtype=q.dtype)
-        r_OP_q = np.zeros((3, self.nq), dtype=q.dtype)
-        r_OP_xi = np.zeros(3, dtype=q.dtype)
-        r_OP_xi_q = np.zeros((3, self.nq), dtype=q.dtype)
+        r_nodes = q[:self.nq_r].reshape(self.nnodes, 3, order="F")
+        r_OP = N @ r_nodes
+        r_OP_xi = N_xi @ r_nodes
 
-        p = np.zeros(4, dtype=float)
+        p_nodes = q[self.nq_r:].reshape(self.nnodes, 4, order="F")
+        p = N @ p_nodes
+        p_xi = N_xi @ p_nodes
+        
+        r_OP_q = np.zeros((3, self.nq), dtype=q.dtype)
+        r_OP_xi_q = np.zeros((3, self.nq), dtype=q.dtype)
         p_q = np.zeros((4, self.nq), dtype=q.dtype)
-        p_xi = np.zeros(4, dtype=float)
         p_xi_q = np.zeros((4, self.nq), dtype=q.dtype)
 
         for node in range(self.nnodes):
             nodalDOF_r = self.nodalDOF_r[node]
-            r_OP_node = q[nodalDOF_r]
-
-            r_OP += N[node] * r_OP_node
             r_OP_q[:, nodalDOF_r] += N[node] * np.eye(3, dtype=float)
-
-            r_OP_xi += N_xi[node] * r_OP_node
             r_OP_xi_q[:, nodalDOF_r] += N_xi[node] * np.eye(3, dtype=float)
-
+            
             nodalDOF_p = self.nodalDOF_p[node]
-            p_node = q[nodalDOF_p]
-
-            p += N[node] * p_node
             p_q[:, nodalDOF_p] += N[node] * np.eye(4, dtype=float)
-
-            p_xi += N_xi[node] * p_node
             p_xi_q[:, nodalDOF_p] += N_xi[node] * np.eye(4, dtype=float)
+        
+        # r_OP_q[:, :self.nq_r] = np.concatenate(np.eye(3, dtype=float)[:, :, None] * N[None, None, :], axis=1)
+        # r_OP_xi_q[:, :self.nq_r] = np.concatenate(np.eye(3, dtype=float)[:, :, None] * N_xi[None, None, :], axis=1)
+        # p_q[:, self.nq_r:] = np.concatenate(np.eye(4, dtype=float)[:, :, None] * N[None, None, :], axis=1)
+        # p_xi_q[:, self.nq_r:] = np.concatenate(np.eye(4, dtype=float)[:, :, None] * N_xi[None, None, :], axis=1)
 
         # transformation matrix
         A_IB = Exp_SO3_quat(p, normalize=True)
@@ -555,40 +536,6 @@ class Rod:
             B_Kappa_bar_q,
         )
 
-
-class CircularCrossSection:
-    def __init__(self, radius, *, export_as_wedge=True):
-        """Circular cross-section.
-
-        Parameters
-        ----------
-        radius : float
-            Radius of the cross-section
-        """
-        self._radius = radius
-        self._area = np.pi * radius**2
-        # see https://en.wikipedia.org/wiki/First_moment_of_area
-        self._first_moment = np.zeros(3)
-        # https://en.wikipedia.org/wiki/List_of_second_moments_of_area
-        self._second_moment = np.diag([2, 1, 1]) / 4 * np.pi * radius**4
-
-        self.circle_as_wedge = export_as_wedge
-
-    @property
-    def area(self):
-        return self._area
-
-    @property
-    def first_moment(self):
-        return self._first_moment
-
-    @property
-    def second_moment(self):
-        return self._second_moment
-
-    @property
-    def radius(self):
-        return self._radius
 
 
 class Simo1986:
