@@ -39,6 +39,7 @@ def Spurrier(R: np.ndarray) -> np.ndarray:
 
     return quat
 
+
 Log_SO3_quat = Spurrier
 
 
@@ -146,7 +147,6 @@ def T_SO3_quat_P(P, normalize=True):
     return T_P
 
 
-
 def Exp_SO3(psi: np.ndarray) -> np.ndarray:
     """SO(3) exponential function, see Crisfield1999 above (4.1) and 
     Park2005 (12).
@@ -200,7 +200,8 @@ def ax2skew(a: np.ndarray) -> np.ndarray:
                      [a[2],  0,    -a[0]],
                      [-a[1], a[0], 0    ]], dtype=a.dtype)
     # fmt: on
-    
+
+
 def ax2skew_a():
     """
     Partial derivative of the `ax2skew` function with respect to its argument.
@@ -216,6 +217,7 @@ def ax2skew_a():
     A[0, 1, 2] = -1
     A[1, 0, 2] = 1
     return A
+
 
 def ax2skew_squared(a: np.ndarray) -> np.ndarray:
     """Computes the product of a skew-symmetric matrix with itself from a given axial vector."""
@@ -257,7 +259,8 @@ def interp1d(x, y, xi):
         t = (xi - x0) / (x1 - x0)
         yi = y0 + (y1 - y0) * t
         return yi
-    
+
+
 def lagrange_basis_with_derivative(xs, i):
     xs = np.array(xs, dtype=float)
     xi = xs[i]
@@ -265,13 +268,13 @@ def lagrange_basis_with_derivative(xs, i):
     denom = 1.0
     for j, xj in enumerate(xs):
         if j != i:
-            denom *= (xi - xj)
+            denom *= xi - xj
 
     def L(x):
         num = 1.0
         for j, xj in enumerate(xs):
             if j != i:
-                num *= (x - xj)
+                num *= x - xj
         return num / denom
 
     def dL(x):
@@ -282,8 +285,8 @@ def lagrange_basis_with_derivative(xs, i):
                 num = 1.0
                 for j, xj in enumerate(xs):
                     if j != i and j != k:
-                        num *= (x - xj)
-                res += num 
+                        num *= x - xj
+                res += num
 
         return res / denom
 

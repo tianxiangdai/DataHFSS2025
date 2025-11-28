@@ -10,6 +10,7 @@ from .math import lagrange_basis_with_derivative
 
 eye3 = np.eye(3, dtype=float)
 
+
 def gauss(n, interval=np.array([0, 1])):
     points, weights = roots_legendre(n)
 
@@ -20,10 +21,12 @@ def gauss(n, interval=np.array([0, 1])):
 
     return points, weights
 
+
 class Rod:
     """
     displacement based static rod with one element
     """
+
     def __init__(
         self,
         cross_section,
@@ -53,7 +56,7 @@ class Rod:
         ##############################################################
         # TODO: combine mesh for position and orientation fields
         self.polynomial_degree = polynomial_degree
-        
+
         # total number of nodes
         self.nnodes = polynomial_degree + 1
 
@@ -61,40 +64,51 @@ class Rod:
         self.nq_r = self.nnodes * 3
         self.nq_p = self.nnodes * 4
         self.nq = self.nq_r + self.nq_p
-        
+
         # total number of generalized velocity coordinates
         self.nu_r = self.nnodes * 3
         self.nu_p = self.nnodes * 3
-        
-        
+
         # TODO: not necessary
         self.nu = self.nu_r + self.nu_p
         self.u0 = np.zeros(self.nu, dtype=float)
 
         # global nodal connectivity
         self.nodalDOF_r = np.arange(self.nnodes * 3).reshape(self.nnodes, 3, order="F")
-        self.nodalDOF_p = np.arange(self.nnodes * 4).reshape(self.nnodes, 4, order="F") + self.nq_r
-        self.nodalDOF_r_u = np.arange(self.nnodes * 3).reshape(self.nnodes, 3, order="F")
-        self.nodalDOF_p_u = np.arange(self.nnodes * 3).reshape(self.nnodes, 3, order="F") + self.nu_r
+        self.nodalDOF_p = (
+            np.arange(self.nnodes * 4).reshape(self.nnodes, 4, order="F") + self.nq_r
+        )
+        self.nodalDOF_r_u = np.arange(self.nnodes * 3).reshape(
+            self.nnodes, 3, order="F"
+        )
+        self.nodalDOF_p_u = (
+            np.arange(self.nnodes * 3).reshape(self.nnodes, 3, order="F") + self.nu_r
+        )
 
         # quadrature points and weights
-        self.qp, self.qw = gauss(self.nquadrature, np.array([0, 1])) 
-        
+        self.qp, self.qw = gauss(self.nquadrature, np.array([0, 1]))
+
         xs = np.linspace(0, 1, self.nnodes)
         self.L_dLs = [lagrange_basis_with_derivative(xs, i) for i in range(self.nnodes)]
-        
+
         # shape functions and their first derivatives
-        self.basis_functions_r = lambda xi: np.array([(L_dL[0](xi), L_dL[1](xi)) for L_dL in self.L_dLs]).T
+        self.basis_functions_r = lambda xi: np.array(
+            [(L_dL[0](xi), L_dL[1](xi)) for L_dL in self.L_dLs]
+        ).T
         self.basis_functions_p = self.basis_functions_r
-        
-        self.N = np.array([[self.L_dLs[i][0](xi) for i in range(self.nnodes)] for xi in self.qp])
-        self.N_xi = np.array([[self.L_dLs[i][1](xi) for i in range(self.nnodes)] for xi in self.qp])
+
+        self.N = np.array(
+            [[self.L_dLs[i][0](xi) for i in range(self.nnodes)] for xi in self.qp]
+        )
+        self.N_xi = np.array(
+            [[self.L_dLs[i][1](xi) for i in range(self.nnodes)] for xi in self.qp]
+        )
 
         # referential generalized position coordinates, initial generalized
         # position and velocity coordinates
         self.Q = Q
         self.q0 = Q.copy() if q0 is None else q0
-        
+
         self.uDOF = []
 
         # evaluate shape functions at specific xi
@@ -107,13 +121,12 @@ class Rod:
         self.la_S0 = np.zeros(self.nla_S, dtype=float)
 
         self.set_reference_strains(self.Q)
-        
+
         # allocate memery
-        self.__g_S_q =np.zeros((self.nla_S, self.nq))
+        self.__g_S_q = np.zeros((self.nla_S, self.nq))
         self.__h = np.zeros(self.nu, dtype=np.float64)
         self.__h_q = np.zeros((self.nu, self.nq), dtype=np.float64)
-    
-            
+
     def set_reference_strains(self, Q):
         self.Q = Q.copy()
 
@@ -150,7 +163,6 @@ class Rod:
             self.B_Gamma0[i] = B_Gamma
             self.B_Kappa0[i] = B_Kappa
 
-    
     @staticmethod
     def straight_configuration(
         polynomial_degree,
@@ -176,7 +188,7 @@ class Rod:
         q_p = np.repeat(p, nnodes)
 
         return np.concatenate([q_r, q_p])
-    
+
     @staticmethod
     def pose_configuration(
         polynomial_degree,
@@ -214,20 +226,22 @@ class Rod:
         q_p = p0.reshape(-1, order="C")
 
         return np.concatenate([q_r, q_p])
-    
+
     def step_callback(self, t, q, u):
         """ "Quaternion normalization after each time step."""
         for node in range(self.nnodes):
             p = q[self.nodalDOF_p[node]]
             q[self.nodalDOF_p[node]] = p / norm(p)
         return q, u
-        
+
     def g_S(self, t, q):
         P = q[self.nq_r :].reshape(4, -1)
         return np.sum(P**2, axis=0) - 1
-    
+
     def g_S_q(self, t, q):
-        self.__g_S_q[np.tile(np.arange(self.nla_S), 4), np.arange(self.nq_r, self.nq)] = 2 * q[self.nq_r :]
+        self.__g_S_q[
+            np.tile(np.arange(self.nla_S), 4), np.arange(self.nq_r, self.nq)
+        ] = (2 * q[self.nq_r :])
         return self.__g_S_q
 
     def h(self, t, q, u):
@@ -262,9 +276,7 @@ class Rod:
             ############################
             n_qwi = A_IB @ B_n * qwi
             for node in range(self.nnodes):
-                self.__h[self.nodalDOF_r_u[node]] -= (
-                    self.N_xi[i, node] * n_qwi
-                )
+                self.__h[self.nodalDOF_r_u[node]] -= self.N_xi[i, node] * n_qwi
             m_qwi = B_m * qwi
             cross = (cross3(B_Gamma_bar, B_n) + cross3(B_Kappa_bar, B_m)) * qwi
             for node in range(self.nnodes):
@@ -273,7 +285,7 @@ class Rod:
                 )
 
         return self.__h
-    
+
     def h_q(self, t, q, u):
         self.__h_q.fill(0)
 
@@ -330,9 +342,7 @@ class Rod:
             ############################
             n_q_qwi = qwi * (np.einsum("ikj,k->ij", A_IB_q, B_n) + A_IB @ B_n_q)
             for node in range(self.nnodes):
-                self.__h_q[self.nodalDOF_r[node], :] -= (
-                    self.N_xi[i, node] * n_q_qwi
-                )
+                self.__h_q[self.nodalDOF_r[node], :] -= self.N_xi[i, node] * n_q_qwi
             B_Gamma_bar_B_n_q_qwi = qwi * (
                 ax2skew(B_Gamma_bar) @ B_n_q - ax2skew(B_n) @ B_Gamma_bar_q
             )
@@ -348,12 +358,12 @@ class Rod:
                 )
 
         return self.__h_q
-        
+
     def r_OP(self, t, q, xi, B_r_CP=np.zeros(3, dtype=float)):
         N, N_xi = self.basis_functions_r(xi)
         r_OC, A_IB, _, _ = self._eval(q, xi, N, N_xi)
         return r_OC + A_IB @ B_r_CP
-    
+
     def r_OP_q(self, t, q, xi, B_r_CP=np.zeros(3, dtype=float)):
         # evaluate required quantities
         N, N_xi = self.basis_functions_r(xi)
@@ -373,12 +383,12 @@ class Rod:
     def A_IB(self, t, q, xi):
         N, N_xi = self.basis_functions_r(xi)
         return self._eval(q, xi, N, N_xi)[1]
-    
+
     def A_IB_q(self, t, q, xi):
         # return approx_fprime(q, lambda q: self.A_IB(t, q, xi))
         N, N_xi = self.basis_functions_r(xi)
         return self._deval(q, xi, N, N_xi)[5]
-        
+
     def J_P(self, t, q, xi, B_r_CP=np.zeros(3, dtype=float)):
         # evaluate required nodal shape functions
         N, _ = self.basis_functions_r(xi)
@@ -398,7 +408,7 @@ class Rod:
             J_P[:, self.nodalDOF_p_u[node]] -= N[node] * r_CP_tilde
 
         return J_P
-    
+
     def J_P(self, t, q, xi, B_r_CP=np.zeros(3, dtype=float)):
         # evaluate required nodal shape functions
         N, _ = self.basis_functions_r(xi)
@@ -435,17 +445,17 @@ class Rod:
             J_P_q[:, nodalDOF_p_u] -= N[node] * prod
 
         return J_P_q
-    
+
     def B_J_R(self, t, q, xi):
         N_p, _ = self.basis_functions_p(xi)
         B_J_R = np.zeros((3, self.nu), dtype=float)
         for node in range(self.nnodes):
             B_J_R[:, self.nodalDOF_p_u[node]] += N_p[node] * eye3
         return B_J_R
-    
+
     def B_J_R_q(self, t, q, xi):
         return np.zeros((3, self.nu, self.nq), dtype=float)
-    
+
     def _eval(self, q, xi, N, N_xi):
         # evaluate shape functions
         # N, N_xi = self.basis_functions_r(xi)
@@ -474,7 +484,7 @@ class Rod:
         B_Kappa_bar = T_SO3_quat(p, normalize=True) @ p_xi
 
         return r_OP, A_IB, B_Gamma_bar, B_Kappa_bar
-    
+
     def _deval(self, q, xi, N, N_xi):
         # evaluate shape functions
         # N, N_xi = self.basis_functions_r(xi)
@@ -546,7 +556,7 @@ class Rod:
         )
 
 
-class CircularCrossSection():
+class CircularCrossSection:
     def __init__(self, radius, *, export_as_wedge=True):
         """Circular cross-section.
 

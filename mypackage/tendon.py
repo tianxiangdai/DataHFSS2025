@@ -1,7 +1,7 @@
-
 import numpy as np
 
 from .math import norm
+
 
 class nPointInteraction:
     def __init__(
@@ -186,4 +186,3 @@ class ForceTendon(nPointInteraction):
 
     def set_force(self, force):
         self.la = force if callable(force) else lambda t: force
-        

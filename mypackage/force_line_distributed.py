@@ -40,10 +40,8 @@ class Force_line_distributed:
 
             # multiply local force vector with variation of centerline
             for node in range(self.rod.nnodes):
-                h[self.rod.nodalDOF_r[node]] += (
-                    self.rod.N[i, node] * h_qp
-                )
+                h[self.rod.nodalDOF_r[node]] += self.rod.N[i, node] * h_qp
         return h
 
-    def h_q(self, t, q, u):
-        return None
+    # def h_q(self, t, q, u):
+    #     return None

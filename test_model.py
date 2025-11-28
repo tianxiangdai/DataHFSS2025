@@ -1,8 +1,13 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-from tdcrobots.visualization import BackgroundPlotter
-from mypackage.models import S1T4ForceParallel, ModelParameter, S1T4ForceCrossCCW, S1T4ForceCrossCW
+from mypackage.visualization import BackgroundPlotter
+from mypackage.models import (
+    ModelParameter,
+    S1T4ForceParallel,
+    S1T4ForceCrossCCW,
+    S1T4ForceCrossCW,
+)
 
 if __name__ == "__main__":
 
@@ -44,9 +49,9 @@ if __name__ == "__main__":
         eval_keys=["r_OP"],
         force_steps=100,
         verbose=True,
-        ret_all_steps=True
+        ret_all_steps=True,
     )
-    np.save('test.npy', r_OP)
+    np.save("test.npy", r_OP)
     exit()
-    
+
     model.set_new_initial_state(sol.q[-1], sol.u[-1])

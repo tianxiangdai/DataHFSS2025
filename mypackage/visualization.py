@@ -1,16 +1,11 @@
 import numpy as np
 from abc import ABC, abstractmethod
 from time import perf_counter, sleep
-import threading
 
 import vtk
 import pyvista
-from .rod import CircularCrossSection
 
-from tdcrobots.rods._base import CosseratRod_PetrovGalerkin
-
-
-from tdcrobots.interactions import nPointInteraction
+from .tendon import ForceTendon
 
 
 class _VisualTwinBase(ABC):
@@ -29,7 +24,7 @@ class _VisualTwinBase(ABC):
 
 class VisualTendon(_VisualTwinBase):
     def __init__(
-        self, tendon: nPointInteraction, r_tendon=1e-3, color=(255, 255, 255), opacity=1
+        self, tendon: ForceTendon, r_tendon=1e-3, color=(255, 255, 255), opacity=1
     ):
         super().__init__(tendon)
         poly_data = vtk.vtkPolyData()
@@ -72,7 +67,6 @@ class VisualTendon(_VisualTwinBase):
         self.vtkpoints.Modified()
 
 
-
 class VisualRodBody(_VisualTwinBase):
     def __init__(
         self, rod, nelement_visual=1, subdivision=3, color=(82, 108, 164), opacity=1
@@ -81,24 +75,16 @@ class VisualRodBody(_VisualTwinBase):
         self.rod = rod
         self.nelement_visual = nelement_visual
 
-        if isinstance(rod.cross_section, CircularCrossSection):
-            weights = [
-                1.0,
-                1.0,
-                1.0,
-                0.5,
-                0.5,
-                0.5,
-            ]
-            degrees = [2, 2, 1]
-            ctype = vtk.VTK_BEZIER_WEDGE
-        # elif isinstance(rod.cross_section, RectangularCrossSection):
-        #     npts = 16
-        #     weights = [1] * 16
-        #     degrees = [1, 1, 3]
-        #     ctype = vtk.VTK_BEZIER_HEXAHEDRON
-        else:
-            raise NotImplementedError
+        weights = [
+            1.0,
+            1.0,
+            1.0,
+            0.5,
+            0.5,
+            0.5,
+        ]
+        degrees = [2, 2, 1]
+        ctype = vtk.VTK_BEZIER_WEDGE
 
         ugrid = vtk.vtkUnstructuredGrid()
 
@@ -199,8 +185,6 @@ class _VisualvtkSource(_VisualTwinBase):
         self.xi = xi
         self.H_IB = vtk.vtkMatrix4x4()
         self.H_IB.Identity()
-        if isinstance(self.contr, CosseratRod_PetrovGalerkin):
-            self.N, self.N_xi = self.contr.basis_functions_r(xi)
 
     def add_vtk_source(
         self,
@@ -304,8 +288,6 @@ class VisualArUco(_VisualTwinBase):
     ):
         super().__init__(contr)
         self.xi = xi
-        if isinstance(self.contr, CosseratRod_PetrovGalerkin):
-            self.N, self.N_xi = self.contr.basis_functions_r(xi)
         from cv2 import aruco
 
         n_row = 2

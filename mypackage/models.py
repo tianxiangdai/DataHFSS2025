@@ -1,8 +1,6 @@
 import numpy as np
 from abc import ABC
 from os import path
-from scipy.sparse import csc_array, lil_array, bmat
-from scipy.sparse.linalg import spsolve
 from scipy.optimize import least_squares
 
 
@@ -23,6 +21,7 @@ from .system import System
 from .force_line_distributed import Force_line_distributed
 from .rod import Rod
 from .tendon import ForceTendon
+
 
 class ModelParameter:
     def __init__(self):
@@ -197,7 +196,7 @@ class __ModelBase(ABC):
                 ]
             ),
             name="gravity_marker_platform",
-            xi=1
+            xi=1,
         )
 
         # ---- add to system ----
@@ -225,75 +224,6 @@ class __ModelBase(ABC):
         self.system.set_new_initial_state(q0, u0, t0, **assemble_kwargs)
         self.static_solver.renew_initial_state()
 
-    def __solver_jac(self, x, t):
-        # unpack unknowns
-        q, la_g, la_c, la_N = np.array_split(x, self.static_solver.split_x)
-
-        # evaluate quantites that are required for computing the residual and the jacobian
-        W_g = (
-            self.system.W_g(t, q, format="csr")
-            if self.static_solver.mask_x[1]
-            else np.empty(0)
-        )
-        W_c = (
-            self.system.W_c(t, q, format="csr")
-            if self.static_solver.mask_x[2]
-            else np.empty(0)
-        )
-        W_N = (
-            self.system.W_N(t, q, format="csr")
-            if self.static_solver.mask_x[3]
-            else np.empty(0)
-        )
-
-        # evaluate additionally required quantites for computing the jacobian
-        # coo is used for efficient bmat
-        K = (
-            self.system.h_q(t, q, self.static_solver.u0)
-            + self.system.Wla_g_q(t, q, la_g)
-            + self.system.Wla_c_q(t, q, la_c)
-        )
-        if self.static_solver.mask_f[1]:
-            g_q = self.system.g_q(t, q)
-        else:
-            g_q = W_g = None
-        if self.static_solver.mask_f[2]:
-            c_q = self.system.c_q(t, q, self.static_solver.u0, la_c)
-            c_la_c = self.system.c_la_c()
-        else:
-            c_q = c_la_c = W_c = None
-        if self.static_solver.mask_f[3]:
-            g_S_q = self.system.g_S_q(t, q)
-
-        if self.static_solver.mask_f[4]:
-            g_N_q = self.system.g_N_q(t, q, format="csr")
-
-            Rla_N_q = lil_array(
-                (self.static_solver.nla_N, self.static_solver.nq), dtype=np.float64
-            )
-            Rla_N_la_N = lil_array(
-                (self.static_solver.nla_N, self.static_solver.nla_N), dtype=np.float64
-            )
-            for i in range(self.static_solver.nla_N):
-                if la_N[i] < self.static_solver.g_N[i]:
-                    Rla_N_la_N[i, i] = 1.0
-                else:
-                    Rla_N_q[i] = g_N_q[i]
-        else:
-            Rla_N_q = Rla_N_la_N = W_N = None
-
-        # fmt: off
-        _jac = np.array(
-            [
-                [      K,     W_g,      W_c,         W_N],
-                [    g_q,     None,     None,       None],
-                [    c_q,     None,   c_la_c,       None],
-                [  g_S_q,     None,     None,       None],
-                [Rla_N_q,     None,     None, Rla_N_la_N]
-            ]
-        )[self.static_solver.mask_f][:, self.static_solver.mask_x]
-        return bmat(_jac, format="csc")
-
     def __init_visualization(self):
         param = self.param
         self.visual_twins.append(
@@ -308,9 +238,7 @@ class __ModelBase(ABC):
         for i in range(self.rod.nnodes):
             self.visual_twins.append(
                 VisualCoordSystem(
-                    self.rod,
-                    param.visual_len_axis_rod,
-                    xi=i/(self.rod.nnodes-1)
+                    self.rod, param.visual_len_axis_rod, xi=i / (self.rod.nnodes - 1)
                 )
             )
         self.visual_twins.append(
@@ -442,10 +370,9 @@ class __ModelBase(ABC):
             )
         if warm_start:
             self.force_init = forces[-1]
-        return self.__data_evaluation(t, q, eval_keys, x)
+        return self.__data_evaluation(t, q, eval_keys)
 
-    def __data_evaluation(self, t, q, eval_keys, x=None):
-        statics = False if x is None else True
+    def __data_evaluation(self, t, q, eval_keys):
         nt = len(t)
         if nt != self.nt:
             self.nt = nt
@@ -454,21 +381,13 @@ class __ModelBase(ABC):
             self.A_IB = np.empty((nt, 3, 3), dtype=np.float64)
             self.l_tendon = np.empty((nt, ntendon), dtype=np.float64)
             self.la_tendon = np.empty((nt, ntendon), dtype=np.float64)
-            if statics:
-                self.r_OP_la = np.empty((nt, 3, ntendon), dtype=np.float64)
-                self.A_IB_la = np.empty((nt, 3, 3, ntendon), dtype=np.float64)
-        # A_IB_la = np.zeros((nt, 3, 3, self.nt), dtype=np.float64)
-        # l_ipt_tendon = np.empty((nt, self.nt), dtype=np.float64)
-        # la_ipt_tendon = np.empty((nt, self.nt, self.nt), dtype=np.float64)
+
         last_node = self.rod
         for i, ti, qi in zip(range(nt), t, q):
             # displacement x,y,z
             if "r_OP" in eval_keys:
                 self.r_OP[i] = last_node.r_OP(
-                    ti,
-                    qi[last_node.qDOF],
-                    B_r_CP=self.param.B_r_CP_top_platform,
-                    xi=1
+                    ti, qi[last_node.qDOF], B_r_CP=self.param.B_r_CP_top_platform, xi=1
                 )
             # transformation matrix
             if "A_IB" in eval_keys:
@@ -489,41 +408,6 @@ class __ModelBase(ABC):
                     for tendon in self.tendons
                 ]
 
-            if statics:
-                xi = x[i]
-                # derivatives wrt. input la
-                if "r_OP_la" in eval_keys:
-                    # TODO: self.__solver_jac is not efficient
-                    f_x = (
-                        self.__solver_jac(xi, ti)
-                        if nt > 1
-                        else self.static_solver.jac(xi, ti)
-                    )
-                    f_la = lil_array((xi.shape[0], len(self.tendons)), dtype=np.float64)
-                    for j, tendon in enumerate(self.tendons):
-                        f_la[tendon.uDOF, j] = -tendon.W_l(ti, qi[tendon.qDOF])
-                    x_la_i = spsolve(-f_x, f_la.tocsc())
-                    if x_la_i.ndim == 1:
-                        x_la_i = csc_array(np.expand_dims(x_la_i, 0).T)
-                    # r_OP_la
-                    if "r_OP_la" in eval_keys:
-                        self.r_OP_la[i] = (
-                            last_node.r_OP_q(
-                                ti,
-                                qi[last_node.qDOF],
-                                B_r_CP=self.param.B_r_CP_top_platform,
-                            )
-                            @ x_la_i[last_node.qDOF]
-                        )
-                    # A_IB_la
-                    if "A_IB_la" in eval_keys:
-                        self.A_IB_la[i] = (
-                            self.marker_platform.A_IB_q(
-                                ti,
-                                qi[self.marker_platform.qDOF],
-                            )
-                            @ x_la_i[self.marker_platform.qDOF].toarray()
-                        )
         evals = []
         for key in eval_keys:
             if nt == 1 and not key == "sol":
@@ -558,7 +442,7 @@ class __ModelBase(ABC):
             la_bounds = np.tile(la_bounds, (poses.shape[0], 1))
         print(la_bounds.shape)
 
-        eval_keys_ext = list(set(["r_OP", "A_IB", "r_OP_la"] + eval_keys))
+        eval_keys_ext = list(set(["r_OP", "A_IB"] + eval_keys))
 
         # --------------------
         #   Force Minimization
@@ -576,7 +460,6 @@ class __ModelBase(ABC):
             A_IB_meas = Exp_SO3(pos[3:])
             r_OP = ret[eval_keys_ext.index("r_OP")]
             A_IB = ret[eval_keys_ext.index("A_IB")]
-            # r_OP_la = ret[eval_keys_.index("r_OP_la")]
             ret = [ret[eval_keys_ext.index(k)] for k in eval_keys]
             # error
             err = np.array(
@@ -586,42 +469,6 @@ class __ModelBase(ABC):
                 )
             )
             return (err, *ret)
-
-        """
-        def jac(x, t_act, pos, eval_keys=[]):
-            f = np.zeros_like(t_act, dtype=np.float64)
-            f[t_act == 1] = x
-            eval_keys_ = list(set(["r_OP_la", "A_IB", "A_IB_la"] + eval_keys))
-            ret = self.__apply_forces(
-                np.expand_dims(f, 0),
-                np.expand_dims(pld, 0),
-                eval_keys=eval_keys_,
-                verbose=False,
-                force_steps=1,
-                warm_start=warm_start,
-            )
-            A_IB_meas = Exp_SO3(pos[3:])
-            r_OP_la = ret[eval_keys_.index("r_OP_la")]
-            A_IB = ret[eval_keys_.index("A_IB")]
-            A_IB_la = ret[eval_keys_.index("A_IB_la")]
-            ret = [ret[eval_keys_.index(k)] for k in eval_keys]
-            # error
-            return (
-                np.vstack(
-                    (
-                        r_OP_la * 1000,
-                        np.rad2deg(
-                            np.einsum(
-                                "ijk, jkl->il",
-                                Log_SO3_A(A_IB_meas.T @ A_IB),
-                                (A_IB_meas.T @ A_IB_la),
-                            )
-                        ),
-                    )
-                )[:, t_act == 1],
-                *ret,
-            )
-"""
 
         x_scale = 1e4
         x0 = self.force_init[tendon_activations[0] == 1] / x_scale
@@ -636,7 +483,6 @@ class __ModelBase(ABC):
             sol = least_squares(
                 lambda x: sim(x * x_scale, la_act, pos)[0],
                 x0,
-                # jac=lambda x: jac(x * x_scale, t_act, pos)[0] * x_scale,
                 bounds=x_bd.T,
             )
             if not sol.success:
@@ -700,7 +546,7 @@ class S1T4ForceParallel(__ModelBase):
                 subsystem_list=[self.system.origin, self.rod],
                 connectivity=[(0, 1)],
                 B_r_CP_list=B_r_CP_list,
-                xi_list=[0, 1]
+                xi_list=[0, 1],
             )
             self.tendons.append(tendon)
         self.system.add(*self.tendons)
@@ -735,7 +581,7 @@ class S1T4ForceCrossCW(__ModelBase):
                 subsystem_list=[self.system.origin, self.rod],
                 connectivity=[(0, 1)],
                 B_r_CP_list=B_r_CP_list,
-                xi_list=[0, 1]
+                xi_list=[0, 1],
             )
             self.tendons.append(tendon)
         self.system.add(*self.tendons)
@@ -770,7 +616,7 @@ class S1T4ForceCrossCCW(__ModelBase):
                 subsystem_list=[self.system.origin, self.rod],
                 connectivity=[(0, 1)],
                 B_r_CP_list=B_r_CP_list,
-                xi_list=[0, 1]
+                xi_list=[0, 1],
             )
             self.tendons.append(tendon)
         self.system.add(*self.tendons)

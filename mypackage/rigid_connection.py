@@ -3,7 +3,6 @@ import numpy as np
 from .math import ax2skew, cross3
 
 
-    
 def concatenate_qDOF(object):
     qDOF1 = object.subsystem1.qDOF
     qDOF2 = object.subsystem2.qDOF
@@ -185,7 +184,7 @@ class RigidConnection:
         A_IJ0=None,
         xi1=None,
         xi2=None,
-        name = "rigid_connection",
+        name="rigid_connection",
     ):
         self.name = name
         self.subsystem1 = subsystem1
@@ -206,7 +205,6 @@ class RigidConnection:
         self.projection_pairs = projection_pairs_rotation
 
         self.constrain_orientation = self.nla_g_rot > 0
-
 
     def assembler_callback(self):
         qDOF1, qDOF2 = concatenate_qDOF(self)
@@ -333,5 +331,3 @@ class RigidConnection:
                 ) + np.einsum("ij,ik->kj", -la_g[3 + i] * n_q2, J_R2)
 
         return Wla_g_q
-
-

@@ -1,5 +1,6 @@
 from numpy import zeros, einsum
 
+
 class Force:
     r"""Force represented w.r.t. I-basis
 
