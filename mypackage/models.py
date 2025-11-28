@@ -1,0 +1,777 @@
+import numpy as np
+from abc import ABC
+from os import path
+from scipy.sparse import csc_array, lil_array, bmat
+from scipy.sparse.linalg import spsolve
+from scipy.optimize import least_squares
+
+
+from .rigid_connection import RigidConnection
+from .force import Force
+
+from .rod import CircularCrossSection, Simo1986
+from .visualization import (
+    VisualArUco,
+    VisualRodBody,
+    VisualSTL,
+    VisualTendon,
+    VisualCoordSystem,
+)
+from .solver import StaticSolver
+from .math import interp1d, Exp_SO3, Log_SO3
+from .system import System
+from .force_line_distributed import Force_line_distributed
+from .rod import Rod
+from .tendon import ForceTendon
+
+class ModelParameter:
+    def __init__(self):
+        # base platform
+        # self.h_base = 10e-3
+        # self.r_base = 80e-3
+        # self.r_OP0_base_platform = np.array([0, 0, 0], dtype=np.float64
+        # self.AIB0_base_platform = np.eye(3, dtype=np.float64
+        self.g_accel = 9.81
+
+        # beam
+        self.m_rod = 0.433  # kg
+        self.r_rod = 30e-3
+        self.l_rod = 95e-3
+        self.poly_degree = 3
+        self.rod_A_IB0 = np.zeros((3, 3), dtype=np.float64)
+        self.rod_A_IB0[0, 1] = self.rod_A_IB0[1, 2] = self.rod_A_IB0[2, 0] = 1
+
+        self.h_rod_foot = 11.5e-3
+        # self.r_rod_foot = 47e-3
+
+        # connector
+        # self.h_connector = 16e-3
+        # self.h_connector_cut = 3.5e-3
+        # self.h0_connector = (
+        #     self.l_rod + self.h_rod_foot * 2 + self.h_connector / 2 - self.h_connector_cut
+        # )
+
+        # marker_platform
+        # self.h_marker_platform = 8.5e-3
+        self.m_marker_platform = 0.185  # kg
+        self.h_marker_platform = 14.5e-3  # - 0.15e-3
+        self.h_marker_platform_cut = 11.5e-3
+        self.h0_marker_platform = 121e-3 - self.h_marker_platform / 2
+        # self.h0_marker_platform = (
+        #     self.l_rod
+        #     + self.h_rod_foot * 2
+        #     + self.h_marker_platform / 2
+        #     - self.h_marker_platform_cut
+        # )
+
+        # tendon mount hole
+        self.dr_OP0_tendon_hole = np.array([0, 0, 0], dtype=np.float64)
+        self.A_IB0_tendon_hole = np.eye(3, dtype=np.float64)
+        self.r_hole = 65e-3
+
+        # material parameter
+        # blue continuum shore 30
+        # self.E_A = 7.78144426e5
+        # self.E_I = 7.01907665e5
+        # self.G = 2.5096369e5
+        # motor
+        # self.r_motor = 0.006
+
+        # auxiliary variables
+        self.B_r_CP_top_platform = self.rod_A_IB0.T @ np.array(
+            [
+                0,
+                0,
+                self.h_rod_foot + self.h_marker_platform - self.h_marker_platform_cut,
+            ]
+        )
+        ##########################
+        # Visualization Properties
+        ##########################
+        self.color_rod = (82, 108, 164)
+        self.color_marker_platform = (255, 250, 240)
+        self.color_tendon = (0, 200, 50)  # (130, 130, 130)
+        self.color_connector = (160, 160, 160)
+        self.color_ground_platform = (255, 250, 240)
+        self.visual_r_tendon = 1e-3
+        self.visual_len_axis_marker = 0.045
+        self.visual_len_axis_rod = self.r_rod
+        self.visual_rod_centerline_nelement = 2
+        self.visual_rod_nonlinear_subdivision = 4
+        self.visual_rod_body_nelement = 2**self.visual_rod_nonlinear_subdivision
+        self.visual_rod_opacity = 0.5
+        self.visual_marker_platform_opacity = 1
+        self.visual_marker_opacity = 1
+        self.visual_connector_opacity = 1
+        self.visual_tendon_opacity = 1
+
+        ###############
+        # Rod Stiffness
+        ###############
+        # self.E_A = 7.342773912399075e5
+        # self.E_I = 6.695080165688475e5
+        # self.G_A = 2.25351751449743e5
+        # self.G_J = 2.25351751449743e5
+        # due to parameter identification on 10. Dez. 24
+        self.E_A = self.E_I = 7.07287431e5
+        self.G_A = self.G_J = 2.28672004e5
+        self.d_gamma_dot = 1e3
+        self.d_kappa_dot = 1e-2
+
+
+class __ModelBase(ABC):
+    def __init__(self, param: ModelParameter) -> None:
+        self.param = param
+        self.visual_twins = []
+
+        # ---- system ----
+        self.system = System()
+
+        # ---- rod ----
+        cross_section = CircularCrossSection(param.r_rod)
+        EA = param.E_A * cross_section.area
+        EI = param.E_I * cross_section.second_moment[1, 1]
+        GA = param.G_A * cross_section.area
+        GJ = param.G_J * cross_section.second_moment[0, 0]
+        material_model = Simo1986(
+            np.array([EA, GA, GA]),
+            np.array([GJ, EI, EI]),
+        )
+
+        # generate initial configuration
+        r_OP0 = np.array([0, 0, param.h_rod_foot])
+        m_rod = param.m_rod
+        m_platform = param.m_marker_platform
+        g = param.g_accel
+        L0_rod = param.l_rod / (1 - (m_platform + m_rod / 2) * g / EA)
+        Q = Rod.straight_configuration(
+            param.poly_degree,
+            L0_rod,
+            r_OP0,
+            self.param.rod_A_IB0,
+        )
+
+        def r_OP(xi):
+            z = (
+                xi + m_rod * g / EA / 2 * (xi**2 - 2 * xi) - m_platform * g / EA * xi
+            ) * L0_rod
+            return np.array([z, 0, 0], dtype=np.float64)
+
+        A_IB = lambda xi: np.eye(3, dtype=np.float64)
+        q0 = Rod.pose_configuration(
+            param.poly_degree,
+            r_OP,
+            A_IB,
+            r_OP0=r_OP0,
+            A_IB0=self.param.rod_A_IB0,
+        )
+
+        density = m_rod / L0_rod / cross_section.area
+        self.rod = Rod(
+            cross_section,
+            material_model,
+            param.poly_degree,
+            Q=Q,
+            q0=q0,
+        )
+
+        # ---- rigid connections ----
+        rc1 = RigidConnection(self.rod, self.system.origin, xi1=0)
+
+        # ---- external forces ----
+        gravity_rod = Force_line_distributed(
+            np.array([0, 0, -m_rod * g / L0_rod]),
+            self.rod,
+        )
+        gravity_marker_platform = Force(
+            np.array([0, 0, -m_platform * g]),
+            self.rod,
+            B_r_CP=self.param.rod_A_IB0.T
+            @ np.array(
+                [
+                    0,
+                    0,
+                    param.h_rod_foot
+                    + param.h_marker_platform / 2
+                    - param.h_marker_platform_cut,
+                ]
+            ),
+            name="gravity_marker_platform",
+            xi=1
+        )
+
+        # ---- add to system ----
+        # self.system.add(self.marker_platform)
+        self.system.add(self.rod)
+        self.system.add(gravity_marker_platform)
+        self.system.add(gravity_rod)
+        self.system.add(rc1)
+        # self.system.add(rc2)
+
+    def assemble(self):
+        self.system.assemble()
+        self.force_init = np.array([td.la(0) for td in self.tendons])
+        # ---- solver ----
+        self.static_solver = StaticSolver(
+            self.system,
+            n_load_steps=1,
+            verbose=False,
+            # options=SolverOptions(continue_with_unconverged=False),
+        )
+        self.nt = -1
+        self.__init_visualization()
+
+    def set_new_initial_state(self, q0, u0, t0=None, **assemble_kwargs):
+        self.system.set_new_initial_state(q0, u0, t0, **assemble_kwargs)
+        self.static_solver.renew_initial_state()
+
+    def __solver_jac(self, x, t):
+        # unpack unknowns
+        q, la_g, la_c, la_N = np.array_split(x, self.static_solver.split_x)
+
+        # evaluate quantites that are required for computing the residual and the jacobian
+        W_g = (
+            self.system.W_g(t, q, format="csr")
+            if self.static_solver.mask_x[1]
+            else np.empty(0)
+        )
+        W_c = (
+            self.system.W_c(t, q, format="csr")
+            if self.static_solver.mask_x[2]
+            else np.empty(0)
+        )
+        W_N = (
+            self.system.W_N(t, q, format="csr")
+            if self.static_solver.mask_x[3]
+            else np.empty(0)
+        )
+
+        # evaluate additionally required quantites for computing the jacobian
+        # coo is used for efficient bmat
+        K = (
+            self.system.h_q(t, q, self.static_solver.u0)
+            + self.system.Wla_g_q(t, q, la_g)
+            + self.system.Wla_c_q(t, q, la_c)
+        )
+        if self.static_solver.mask_f[1]:
+            g_q = self.system.g_q(t, q)
+        else:
+            g_q = W_g = None
+        if self.static_solver.mask_f[2]:
+            c_q = self.system.c_q(t, q, self.static_solver.u0, la_c)
+            c_la_c = self.system.c_la_c()
+        else:
+            c_q = c_la_c = W_c = None
+        if self.static_solver.mask_f[3]:
+            g_S_q = self.system.g_S_q(t, q)
+
+        if self.static_solver.mask_f[4]:
+            g_N_q = self.system.g_N_q(t, q, format="csr")
+
+            Rla_N_q = lil_array(
+                (self.static_solver.nla_N, self.static_solver.nq), dtype=np.float64
+            )
+            Rla_N_la_N = lil_array(
+                (self.static_solver.nla_N, self.static_solver.nla_N), dtype=np.float64
+            )
+            for i in range(self.static_solver.nla_N):
+                if la_N[i] < self.static_solver.g_N[i]:
+                    Rla_N_la_N[i, i] = 1.0
+                else:
+                    Rla_N_q[i] = g_N_q[i]
+        else:
+            Rla_N_q = Rla_N_la_N = W_N = None
+
+        # fmt: off
+        _jac = np.array(
+            [
+                [      K,     W_g,      W_c,         W_N],
+                [    g_q,     None,     None,       None],
+                [    c_q,     None,   c_la_c,       None],
+                [  g_S_q,     None,     None,       None],
+                [Rla_N_q,     None,     None, Rla_N_la_N]
+            ]
+        )[self.static_solver.mask_f][:, self.static_solver.mask_x]
+        return bmat(_jac, format="csc")
+
+    def __init_visualization(self):
+        param = self.param
+        self.visual_twins.append(
+            VisualRodBody(
+                self.rod,
+                param.visual_rod_body_nelement,
+                param.visual_rod_nonlinear_subdivision,
+                opacity=param.visual_rod_opacity,
+                color=param.color_rod,
+            )
+        )
+        for i in range(self.rod.nnodes):
+            self.visual_twins.append(
+                VisualCoordSystem(
+                    self.rod,
+                    param.visual_len_axis_rod,
+                    xi=i/(self.rod.nnodes-1)
+                )
+            )
+        self.visual_twins.append(
+            VisualSTL(
+                self.rod,
+                path.join(path.dirname(__file__), "stl", "Segment_Foot_V2.stl"),
+                xi=1,
+                scale=1e-3,
+                A_BM=self.param.rod_A_IB0.T,
+                B_r_CP=self.param.rod_A_IB0.T
+                @ np.array(
+                    [
+                        0,
+                        0,
+                        param.h_rod_foot / 2,
+                    ]
+                ),
+                color=param.color_connector,
+                opacity=param.visual_connector_opacity,
+            )
+        )
+        self.visual_twins.append(
+            VisualSTL(
+                self.rod,
+                path.join(
+                    path.dirname(__file__), "stl", "Marker_Platform_Target_V2.stl"
+                ),
+                xi=1,
+                scale=1e-3,
+                A_BM=self.param.rod_A_IB0.T,
+                B_r_CP=self.param.rod_A_IB0.T
+                @ np.array([0, 0, param.h_rod_foot - param.h_marker_platform_cut]),
+                color=param.color_marker_platform,
+                opacity=param.visual_marker_platform_opacity,
+            )
+        )
+        # self.visual_twins.append(
+        #     VisualSTL(
+        #         self.system.origin,
+        #         path.join(path.dirname(__file__), "stl", "Ground_Platform.stl"),
+        #         scale=1e-3,
+        #         A_BM=np.diag(np.array([-1, 1, -1], dtype=np.float64),
+        #         color=param.color_ground_platform,
+        #     )
+        # )
+        self.visual_twins.append(
+            VisualSTL(
+                self.system.origin,
+                path.join(path.dirname(__file__), "stl", "Segment_Foot_V2.stl"),
+                scale=1e-3,
+                B_r_CP=np.array([0, 0, param.h_rod_foot / 2]),
+                color=param.color_connector,
+                opacity=param.visual_connector_opacity,
+            )
+        )
+        self.visual_twins.append(
+            VisualCoordSystem(
+                self.rod,
+                param.visual_len_axis_marker,
+                xi=1,
+                A_BM=self.param.rod_A_IB0.T,
+                B_r_CP=self.param.B_r_CP_top_platform,
+                opacity=param.visual_marker_platform_opacity,
+            )
+        )
+        self.visual_twins.append(
+            VisualArUco(
+                self.rod,
+                xi=1,
+                mk_size=0.04,
+                mk_dis=0.05,
+                A_BM=self.param.rod_A_IB0.T,
+                B_r_CP=self.param.B_r_CP_top_platform,
+                opacity=param.visual_marker_opacity,
+            )
+        )
+        for tendon in self.tendons:
+            self.visual_twins.append(
+                VisualTendon(
+                    tendon,
+                    r_tendon=param.visual_r_tendon,
+                    color=param.color_tendon,
+                    opacity=param.visual_tendon_opacity,
+                )
+            )
+            # self.visual_twins[-1].actors[0].GetProperty().SetSpecular(0.8)
+
+    def apply_forces(
+        self,
+        *args,
+        **kwargs,
+    ):
+        return self.__apply_forces_statics(*args, **kwargs)
+
+    def __apply_forces_statics(
+        self,
+        forces: np.ndarray,
+        eval_keys=[],
+        verbose=False,
+        force_steps=1,
+        ret_all_steps=False,
+        warm_start=True,
+    ):
+        forces = np.atleast_2d(forces)
+
+        ts = np.linspace(0, 1, forces.shape[0] + 1)
+        # -----------
+        #   tendons
+        # -----------
+        _forces = np.vstack((self.force_init, forces))
+        for i, tendon in enumerate(self.tendons):
+            tendon.set_force(lambda t, i=i: interp1d(ts, _forces[:, i], t))
+        # ------------
+        #   Solve
+        # ------------
+        self.static_solver.set_load_steps(forces.shape[0] * force_steps)
+        self.static_solver.verbose = verbose
+        self.sol = self.static_solver.solve(warm_start=warm_start)
+        # ------------------------
+        #   Solution Evaluation
+        # ------------------------
+        if ret_all_steps:
+            t, q, x = self.sol.t[1:], self.sol.q[1:], self.static_solver.x[1:]
+        else:
+            t, q, x = (
+                self.sol.t[force_steps::force_steps],
+                self.sol.q[force_steps::force_steps],
+                self.static_solver.x[force_steps::force_steps],
+            )
+        if warm_start:
+            self.force_init = forces[-1]
+        return self.__data_evaluation(t, q, eval_keys, x)
+
+    def __data_evaluation(self, t, q, eval_keys, x=None):
+        statics = False if x is None else True
+        nt = len(t)
+        if nt != self.nt:
+            self.nt = nt
+            ntendon = len(self.tendons)
+            self.r_OP = np.empty((nt, 3), dtype=np.float64)
+            self.A_IB = np.empty((nt, 3, 3), dtype=np.float64)
+            self.l_tendon = np.empty((nt, ntendon), dtype=np.float64)
+            self.la_tendon = np.empty((nt, ntendon), dtype=np.float64)
+            if statics:
+                self.r_OP_la = np.empty((nt, 3, ntendon), dtype=np.float64)
+                self.A_IB_la = np.empty((nt, 3, 3, ntendon), dtype=np.float64)
+        # A_IB_la = np.zeros((nt, 3, 3, self.nt), dtype=np.float64)
+        # l_ipt_tendon = np.empty((nt, self.nt), dtype=np.float64)
+        # la_ipt_tendon = np.empty((nt, self.nt, self.nt), dtype=np.float64)
+        last_node = self.rod
+        for i, ti, qi in zip(range(nt), t, q):
+            # displacement x,y,z
+            if "r_OP" in eval_keys:
+                self.r_OP[i] = last_node.r_OP(
+                    ti,
+                    qi[last_node.qDOF],
+                    B_r_CP=self.param.B_r_CP_top_platform,
+                    xi=1
+                )
+            # transformation matrix
+            if "A_IB" in eval_keys:
+                self.A_IB[i] = (
+                    last_node.A_IB(ti, qi[last_node.qDOF]) @ self.param.rod_A_IB0.T
+                )
+            # tendon length
+            if "l_tendon" in eval_keys:
+                self.l_tendon[i] = [
+                    tendon.l(ti, qi[tendon.qDOF]) for tendon in self.tendons
+                ]
+            # tendon force
+            if "la_tendon" in eval_keys:
+                self.la_tendon[i] = [
+                    tendon.la(
+                        ti,
+                    )
+                    for tendon in self.tendons
+                ]
+
+            if statics:
+                xi = x[i]
+                # derivatives wrt. input la
+                if "r_OP_la" in eval_keys:
+                    # TODO: self.__solver_jac is not efficient
+                    f_x = (
+                        self.__solver_jac(xi, ti)
+                        if nt > 1
+                        else self.static_solver.jac(xi, ti)
+                    )
+                    f_la = lil_array((xi.shape[0], len(self.tendons)), dtype=np.float64)
+                    for j, tendon in enumerate(self.tendons):
+                        f_la[tendon.uDOF, j] = -tendon.W_l(ti, qi[tendon.qDOF])
+                    x_la_i = spsolve(-f_x, f_la.tocsc())
+                    if x_la_i.ndim == 1:
+                        x_la_i = csc_array(np.expand_dims(x_la_i, 0).T)
+                    # r_OP_la
+                    if "r_OP_la" in eval_keys:
+                        self.r_OP_la[i] = (
+                            last_node.r_OP_q(
+                                ti,
+                                qi[last_node.qDOF],
+                                B_r_CP=self.param.B_r_CP_top_platform,
+                            )
+                            @ x_la_i[last_node.qDOF]
+                        )
+                    # A_IB_la
+                    if "A_IB_la" in eval_keys:
+                        self.A_IB_la[i] = (
+                            self.marker_platform.A_IB_q(
+                                ti,
+                                qi[self.marker_platform.qDOF],
+                            )
+                            @ x_la_i[self.marker_platform.qDOF].toarray()
+                        )
+        evals = []
+        for key in eval_keys:
+            if nt == 1 and not key == "sol":
+                evals.append(np.squeeze(getattr(self, key), axis=0))
+            else:
+                evals.append(getattr(self, key))
+        return evals[0] if len(evals) == 1 else tuple(evals)
+
+    def apply_poses(
+        self,
+        poses: np.ndarray,
+        tendon_activations=np.array([1]),
+        la_bounds=np.array([0, np.inf]),
+        eval_keys=[],
+        verbose=False,
+        warm_start=True,
+    ):
+        poses = np.atleast_2d(poses)
+        print(tendon_activations.shape)
+        if tendon_activations.ndim == 1:
+            if len(tendon_activations) == 1:
+                tendon_activations = np.tile(
+                    tendon_activations, (poses.shape[0], len(self.tendons))
+                )
+            else:
+                tendon_activations = np.tile(tendon_activations, (poses.shape[0], 1))
+        print(tendon_activations.shape)
+        print(la_bounds.shape)
+        if la_bounds.ndim == 1:
+            la_bounds = np.tile(la_bounds, (poses.shape[0], len(self.tendons), 1))
+        elif la_bounds.ndim == 2:
+            la_bounds = np.tile(la_bounds, (poses.shape[0], 1))
+        print(la_bounds.shape)
+
+        eval_keys_ext = list(set(["r_OP", "A_IB", "r_OP_la"] + eval_keys))
+
+        # --------------------
+        #   Force Minimization
+        # --------------------
+        def sim(la, la_act, pos, eval_keys=[]):
+            f = np.zeros_like(la_act, dtype=np.float64)
+            f[la_act == 1] = la
+            ret = self.__apply_forces_statics(
+                f,
+                eval_keys=eval_keys_ext,
+                verbose=False,
+                force_steps=1,
+                warm_start=warm_start,
+            )
+            A_IB_meas = Exp_SO3(pos[3:])
+            r_OP = ret[eval_keys_ext.index("r_OP")]
+            A_IB = ret[eval_keys_ext.index("A_IB")]
+            # r_OP_la = ret[eval_keys_.index("r_OP_la")]
+            ret = [ret[eval_keys_ext.index(k)] for k in eval_keys]
+            # error
+            err = np.array(
+                (
+                    *(r_OP - pos[:3]) * 1000,
+                    *np.rad2deg(Log_SO3(A_IB_meas.T @ A_IB)),
+                )
+            )
+            return (err, *ret)
+
+        """
+        def jac(x, t_act, pos, eval_keys=[]):
+            f = np.zeros_like(t_act, dtype=np.float64)
+            f[t_act == 1] = x
+            eval_keys_ = list(set(["r_OP_la", "A_IB", "A_IB_la"] + eval_keys))
+            ret = self.__apply_forces(
+                np.expand_dims(f, 0),
+                np.expand_dims(pld, 0),
+                eval_keys=eval_keys_,
+                verbose=False,
+                force_steps=1,
+                warm_start=warm_start,
+            )
+            A_IB_meas = Exp_SO3(pos[3:])
+            r_OP_la = ret[eval_keys_.index("r_OP_la")]
+            A_IB = ret[eval_keys_.index("A_IB")]
+            A_IB_la = ret[eval_keys_.index("A_IB_la")]
+            ret = [ret[eval_keys_.index(k)] for k in eval_keys]
+            # error
+            return (
+                np.vstack(
+                    (
+                        r_OP_la * 1000,
+                        np.rad2deg(
+                            np.einsum(
+                                "ijk, jkl->il",
+                                Log_SO3_A(A_IB_meas.T @ A_IB),
+                                (A_IB_meas.T @ A_IB_la),
+                            )
+                        ),
+                    )
+                )[:, t_act == 1],
+                *ret,
+            )
+"""
+
+        x_scale = 1e4
+        x0 = self.force_init[tendon_activations[0] == 1] / x_scale
+        force_opt = np.zeros((len(poses), self.nt), dtype=np.float64)
+        for i, pos, la_act, la_bd in zip(
+            range(len(poses)), poses, tendon_activations, la_bounds
+        ):
+            if not warm_start:
+                x0 = self.force_init[la_act == 1] / x_scale
+            x_bd = la_bd[la_act == 1] / x_scale
+            x0 = np.minimum(np.maximum(x0, x_bd[:, 0]), x_bd[:, 1])
+            sol = least_squares(
+                lambda x: sim(x * x_scale, la_act, pos)[0],
+                x0,
+                # jac=lambda x: jac(x * x_scale, t_act, pos)[0] * x_scale,
+                bounds=x_bd.T,
+            )
+            if not sol.success:
+                print(sol)
+                break
+            force_opt[i, la_act == 1] = sol.x * x_scale
+            if verbose:
+                print(
+                    i,
+                    "pos",
+                    np.array2string(
+                        pos,
+                        formatter={"float_kind": lambda x: "%.5f" % x},
+                        separator=", ",
+                    ),
+                    "forces",
+                    np.array2string(
+                        force_opt,
+                        formatter={"float_kind": lambda x: "%.1f" % x},
+                        separator=", ",
+                    ),
+                    f"pos err {round(np.linalg.norm(sol.fun[:3]), 2)} [mm]",
+                    f"ori err {round(np.linalg.norm(sol.fun[3:]), 2)} [deg]",
+                )
+            if warm_start:
+                x0 = sol.x
+        return self.__apply_forces_statics(
+            force_opt,
+            eval_keys=eval_keys,
+            verbose=False,
+            force_steps=1,
+            warm_start=warm_start,
+        )
+
+
+class S1T4ForceParallel(__ModelBase):
+    def __init__(self, param=ModelParameter()) -> None:
+        super().__init__(param)
+        B_r_CP_lists = [
+            [
+                np.array([param.r_hole * np.cos(phi), param.r_hole * np.sin(phi), 0]),
+                param.rod_A_IB0.T
+                @ (
+                    param.dr_OP0_tendon_hole
+                    + param.A_IB0_tendon_hole
+                    @ np.array(
+                        [
+                            param.r_hole * np.cos(phi),
+                            param.r_hole * np.sin(phi),
+                            param.h_rod_foot - param.h_marker_platform_cut,
+                        ]
+                    )
+                ),
+            ]
+            for phi in np.linspace(0, 2 * np.pi, 4, endpoint=False)
+        ]
+        # ---- tendons ----
+        self.tendons = []
+        for B_r_CP_list in B_r_CP_lists:
+            tendon = ForceTendon(
+                subsystem_list=[self.system.origin, self.rod],
+                connectivity=[(0, 1)],
+                B_r_CP_list=B_r_CP_list,
+                xi_list=[0, 1]
+            )
+            self.tendons.append(tendon)
+        self.system.add(*self.tendons)
+        self.assemble()
+
+
+class S1T4ForceCrossCW(__ModelBase):
+    def __init__(self, param=ModelParameter()) -> None:
+        super().__init__(param)
+        B_r_CP_lists = [
+            [
+                np.array([param.r_hole * np.cos(phi), param.r_hole * np.sin(phi), 0]),
+                param.rod_A_IB0.T
+                @ (
+                    param.dr_OP0_tendon_hole
+                    + param.A_IB0_tendon_hole
+                    @ np.array(
+                        [
+                            param.r_hole * np.cos(phi + np.pi / 2),
+                            param.r_hole * np.sin(phi + np.pi / 2),
+                            param.h_rod_foot - param.h_marker_platform_cut,
+                        ]
+                    )
+                ),
+            ]
+            for phi in np.linspace(0, 2 * np.pi, 4, endpoint=False)
+        ]
+        # ---- tendons ----
+        self.tendons = []
+        for B_r_CP_list in B_r_CP_lists:
+            tendon = ForceTendon(
+                subsystem_list=[self.system.origin, self.rod],
+                connectivity=[(0, 1)],
+                B_r_CP_list=B_r_CP_list,
+                xi_list=[0, 1]
+            )
+            self.tendons.append(tendon)
+        self.system.add(*self.tendons)
+        self.assemble()
+
+
+class S1T4ForceCrossCCW(__ModelBase):
+    def __init__(self, param=ModelParameter()) -> None:
+        super().__init__(param)
+        B_r_CP_lists = [
+            [
+                np.array([param.r_hole * np.cos(phi), param.r_hole * np.sin(phi), 0]),
+                param.rod_A_IB0.T
+                @ (
+                    param.dr_OP0_tendon_hole
+                    + param.A_IB0_tendon_hole
+                    @ np.array(
+                        [
+                            param.r_hole * np.cos(phi - np.pi / 2),
+                            param.r_hole * np.sin(phi - np.pi / 2),
+                            param.h_rod_foot - param.h_marker_platform_cut,
+                        ]
+                    )
+                ),
+            ]
+            for phi in np.linspace(0, 2 * np.pi, 4, endpoint=False)
+        ]
+        # ---- tendons ----
+        self.tendons = []
+        for B_r_CP_list in B_r_CP_lists:
+            tendon = ForceTendon(
+                subsystem_list=[self.system.origin, self.rod],
+                connectivity=[(0, 1)],
+                B_r_CP_list=B_r_CP_list,
+                xi_list=[0, 1]
+            )
+            self.tendons.append(tendon)
+        self.system.add(*self.tendons)
+        self.assemble()
