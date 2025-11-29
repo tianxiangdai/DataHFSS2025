@@ -34,8 +34,9 @@ class Force:
         self.qDOF = self.subsystem.qDOF
         self.uDOF = self.subsystem.uDOF
 
-    def h(self, t, q, u):
-        return self.force(t) @ self.J_P(t, q)
+    def h(self, t):
+        return self.force(t) @ self.J_P(t, self.q)
 
-    def h_q(self, t, q, u):
+    def h_q(self, t):
+        q = self.q
         return einsum("i,ijk->jk", self.force(t), self.J_P_q(t, q))

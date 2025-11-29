@@ -69,7 +69,13 @@ class VisualTendon(_VisualTwinBase):
 
 class VisualRodBody(_VisualTwinBase):
     def __init__(
-        self, rod, radius, nelement_visual=1, subdivision=3, color=(82, 108, 164), opacity=1
+        self,
+        rod,
+        radius,
+        nelement_visual=1,
+        subdivision=3,
+        color=(82, 108, 164),
+        opacity=1,
     ):
         super().__init__(rod)
         self.rod = rod
@@ -147,8 +153,7 @@ class VisualRodBody(_VisualTwinBase):
         # control points on circle
         phis = np.linspace(0.0, 2.0 * np.pi, 3, endpoint=False)
         xys1 = (
-            np.stack([np.zeros_like(phis), np.cos(phis), np.sin(phis)], axis=1)
-            * radius
+            np.stack([np.zeros_like(phis), np.cos(phis), np.sin(phis)], axis=1) * radius
         )
         # control points out of circle
         phis2 = phis + (np.pi / 3.0)
@@ -397,10 +402,10 @@ class BackgroundPlotter(pyvista.Plotter):
                             self.__add_visual_twin(twin)
 
         def decorate_step_callback(step_callback):
-            def __step_callback(t, q, u):
-                r = step_callback(t, q, u)
+            def __step_callback(t, q):
+                r = step_callback(t, q)
                 if self.do_render:
-                    self.step_render(t, q, u)
+                    self.step_render(t, q)
                 return r
 
             return __step_callback

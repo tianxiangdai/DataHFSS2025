@@ -27,6 +27,7 @@ if __name__ == "__main__":
     cam_view_angle = np.rad2deg(np.arctan(min(px, py) / 2 / fx) * 2)
 
     pm = ModelParameter()
+    pm.poly_degree = 3
     # pm.d_gamma_dot = 1e-3
     # pm.d_kappa_dot = 1e-3
     model = S1T4ForceCrossCW(param=pm)
@@ -43,7 +44,11 @@ if __name__ == "__main__":
     plotter.camera.up = -e_y_cam
     plotter.camera.clipping_range = (0.01, 1)
     plotter.camera.zoom(zoom)
-    plotter.show()
+    # plotter.show()
+    import cProfile
+
+    prof = cProfile.Profile()
+    prof.enable()
     r_OP = model.apply_forces(
         np.array([50, 0, 0, 0]),
         eval_keys=["r_OP"],
@@ -51,7 +56,11 @@ if __name__ == "__main__":
         verbose=True,
         ret_all_steps=True,
     )
+    prof.disable()
+    prof.dump_stats("profile.prof")
     np.save("test.npy", r_OP)
+    import compare_data
+
     exit()
 
     model.set_new_initial_state(sol.q[-1], sol.u[-1])

@@ -3,7 +3,7 @@ import numpy as np
 from .math import norm
 
 
-class nPointInteraction:
+class ForceTendon:
     def __init__(
         self,
         subsystem_list,
@@ -12,10 +12,10 @@ class nPointInteraction:
         B_r_CP_list=None,
     ) -> None:
         self.subsystems = subsystem_list
-        self.n_subsystems = len(subsystem_list)
-        self.xis = self.n_subsystems * [(0,)] if xi_list is None else xi_list
+        self.n_sys = len(subsystem_list)
+        self.xis = self.n_sys * [0] if xi_list is None else xi_list
         self.Bi_r_CPis = (
-            self.n_subsystems * [np.zeros(3)] if B_r_CP_list is None else B_r_CP_list
+            self.n_sys * [None] if B_r_CP_list is None else B_r_CP_list
         )
         self.connectivity = connectivity
 
@@ -38,11 +38,11 @@ class nPointInteraction:
         self._nu = np.array(self._nu, int)
 
         self.nq_val = [
-            np.arange(*self._nq[i : i + 2]) for i in range(self.n_subsystems)
+            np.arange(*self._nq[i : i + 2]) for i in range(self.n_sys)
         ]
 
         self.nu_val = [
-            np.arange(*self._nu[i : i + 2]) for i in range(self.n_subsystems)
+            np.arange(*self._nu[i : i + 2]) for i in range(self.n_sys)
         ]
 
     def r_OPk(self, t, q, k):
@@ -53,24 +53,6 @@ class nPointInteraction:
     def r_OPk_qk(self, t, q, k):
         return self.subsystems[k].r_OP_q(
             t, q[self.nq_val[k]], self.xis[k], self.Bi_r_CPis[k]
-        )
-
-    def v_Pk(self, t, q, u, k):
-        return self.subsystems[k].v_P(
-            t,
-            q[self.nq_val[k]],
-            u[self.nu_val[k]],
-            self.xis[k],
-            self.Bi_r_CPis[k],
-        )
-
-    def v_Pk_qk(self, t, q, u, k):
-        return self.subsystems[k].v_P_q(
-            t,
-            q[self.nq_val[k]],
-            u[self.nu_val[k]],
-            self.xis[k],
-            self.Bi_r_CPis[k],
         )
 
     def J_Pk(self, t, q, k):
@@ -115,29 +97,8 @@ class nPointInteraction:
             g_q[self.nq_val[j]] += nij @ self.r_OPk_qk(t, q, j)
         return g_q
 
-    def l_dot(self, t, q, u):
-        gamma = 0
-        for i, j in self.connectivity:
-            gamma += self._nij(t, q, i, j) @ (
-                self.v_Pk(t, q, u, j) - self.v_Pk(t, q, u, i)
-            )
-        return gamma
-
-    def l_dot_q(self, t, q, u):
-        gamma_q = np.zeros((self._nq[-1]), dtype=np.common_type(q, u))
-        for i, j in self.connectivity:
-            nij_qi, nij_qj = self._nij_qij(t, q, i, j)
-            nij = self._nij(t, q, i, j)
-            vi, vj = self.v_Pk(t, q, u, i), self.v_Pk(t, q, u, j)
-            gamma_q[self.nq_val[i]] += (vj - vi) @ nij_qi - nij @ self.v_Pk_qk(
-                t, q, u, i
-            )
-            gamma_q[self.nq_val[j]] += (vj - vi) @ nij_qj - nij @ self.v_Pk_qk(
-                t, q, u, j
-            )
-        return gamma_q
-
-    def W_l(self, t, q):
+    def W_l(self, t):
+        q = self.q
         W = np.zeros((self._nu[-1]), dtype=q.dtype)
         for i, j in self.connectivity:
             nij = self._nij(t, q, i, j)
@@ -145,7 +106,8 @@ class nPointInteraction:
             W[self.nu_val[j]] += self.J_Pk(t, q, j).T @ nij
         return W
 
-    def W_l_q(self, t, q):
+    def W_l_q(self, t):
+        q = self.q
         W_q = np.zeros((self._nu[-1], self._nq[-1]), dtype=q.dtype)
         for i, j in self.connectivity:
             nui, nui1, nuj, nuj1 = self._nu[[i, i + 1, j, j + 1]]
@@ -164,22 +126,11 @@ class nPointInteraction:
             W_q[nuj:nuj1, nqi:nqi1] += J_Pj.T @ nij_qi
         return W_q
 
+    def h(self, t):
+        return -self.la(t) * self.W_l(t)
 
-class ForceTendon(nPointInteraction):
-    def __init__(
-        self,
-        subsystem_list,
-        connectivity,
-        xi_list=None,
-        B_r_CP_list=None,
-    ) -> None:
-        super().__init__(subsystem_list, connectivity, xi_list, B_r_CP_list)
-
-    def h(self, t, q, u):
-        return -self.la(t) * self.W_l(t, q)
-
-    def h_q(self, t, q, u):
-        return -self.la(t) * self.W_l_q(t, q)
+    def h_q(self, t):
+        return -self.la(t) * self.W_l_q(t)
 
     def la(self, t):
         return 0.0

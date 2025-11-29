@@ -7,7 +7,6 @@ from scipy.optimize import least_squares
 from .rigid_connection import RigidConnection
 from .force import Force
 
-from .rod import Simo1986
 from .visualization import (
     VisualArUco,
     VisualRodBody,
@@ -25,11 +24,6 @@ from .tendon import ForceTendon
 
 class ModelParameter:
     def __init__(self):
-        # base platform
-        # self.h_base = 10e-3
-        # self.r_base = 80e-3
-        # self.r_OP0_base_platform = np.array([0, 0, 0], dtype=np.float64
-        # self.AIB0_base_platform = np.eye(3, dtype=np.float64
         self.g_accel = 9.81
 
         # beam
@@ -41,14 +35,6 @@ class ModelParameter:
         self.rod_A_IB0[0, 1] = self.rod_A_IB0[1, 2] = self.rod_A_IB0[2, 0] = 1
 
         self.h_rod_foot = 11.5e-3
-        # self.r_rod_foot = 47e-3
-
-        # connector
-        # self.h_connector = 16e-3
-        # self.h_connector_cut = 3.5e-3
-        # self.h0_connector = (
-        #     self.l_rod + self.h_rod_foot * 2 + self.h_connector / 2 - self.h_connector_cut
-        # )
 
         # marker_platform
         # self.h_marker_platform = 8.5e-3
@@ -56,25 +42,11 @@ class ModelParameter:
         self.h_marker_platform = 14.5e-3  # - 0.15e-3
         self.h_marker_platform_cut = 11.5e-3
         self.h0_marker_platform = 121e-3 - self.h_marker_platform / 2
-        # self.h0_marker_platform = (
-        #     self.l_rod
-        #     + self.h_rod_foot * 2
-        #     + self.h_marker_platform / 2
-        #     - self.h_marker_platform_cut
-        # )
 
         # tendon mount hole
         self.dr_OP0_tendon_hole = np.array([0, 0, 0], dtype=np.float64)
         self.A_IB0_tendon_hole = np.eye(3, dtype=np.float64)
         self.r_hole = 65e-3
-
-        # material parameter
-        # blue continuum shore 30
-        # self.E_A = 7.78144426e5
-        # self.E_I = 7.01907665e5
-        # self.G = 2.5096369e5
-        # motor
-        # self.r_motor = 0.006
 
         # auxiliary variables
         self.B_r_CP_top_platform = self.rod_A_IB0.T @ np.array(
@@ -107,15 +79,8 @@ class ModelParameter:
         ###############
         # Rod Stiffness
         ###############
-        # self.E_A = 7.342773912399075e5
-        # self.E_I = 6.695080165688475e5
-        # self.G_A = 2.25351751449743e5
-        # self.G_J = 2.25351751449743e5
-        # due to parameter identification on 10. Dez. 24
-        self.E_A = self.E_I = 7.07287431e5
-        self.G_A = self.G_J = 2.28672004e5
-        self.d_gamma_dot = 1e3
-        self.d_kappa_dot = 1e-2
+        self.E = 7.07287431e5
+        self.G = 2.28672004e5
 
 
 class __ModelBase(ABC):
@@ -131,15 +96,13 @@ class __ModelBase(ABC):
         area = np.pi * radius**2
         # https://en.wikipedia.org/wiki/List_of_second_moments_of_area
         second_moment = np.diag([2, 1, 1]) / 4 * np.pi * radius**4
-        
-        EA = param.E_A * area
-        EI = param.E_I * second_moment[1, 1]
-        GA = param.G_A * area
-        GJ = param.G_J * second_moment[0, 0]
-        material_model = Simo1986(
-            np.array([EA, GA, GA]),
-            np.array([GJ, EI, EI]),
-        )
+
+        EA = param.E * area
+        EI = param.E * second_moment[1, 1]
+        GA = param.G * area
+        GJ = param.G * second_moment[0, 0]
+        Ei = np.array([EA, GA, GA])
+        Fi = np.array([GJ, EI, EI])
 
         # generate initial configuration
         r_OP0 = np.array([0, 0, param.h_rod_foot])
@@ -170,7 +133,8 @@ class __ModelBase(ABC):
         )
 
         self.rod = Rod(
-            material_model,
+            Ei,
+            Fi,
             param.poly_degree,
             Q=Q,
             q0=q0,
@@ -202,12 +166,10 @@ class __ModelBase(ABC):
         )
 
         # ---- add to system ----
-        # self.system.add(self.marker_platform)
         self.system.add(self.rod)
         self.system.add(gravity_marker_platform)
         self.system.add(gravity_rod)
         self.system.add(rc1)
-        # self.system.add(rc2)
 
     def assemble(self):
         self.system.assemble()
@@ -330,13 +292,6 @@ class __ModelBase(ABC):
             # self.visual_twins[-1].actors[0].GetProperty().SetSpecular(0.8)
 
     def apply_forces(
-        self,
-        *args,
-        **kwargs,
-    ):
-        return self.__apply_forces_statics(*args, **kwargs)
-
-    def __apply_forces_statics(
         self,
         forces: np.ndarray,
         eval_keys=[],

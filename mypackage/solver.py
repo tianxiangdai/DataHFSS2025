@@ -1,7 +1,6 @@
 import numpy as np
-from scipy.sparse import bmat
 from scipy.optimize import OptimizeResult
-from scipy.sparse.linalg import spsolve
+from scipy.linalg import solve as spsolve
 
 from tqdm import tqdm
 from warnings import warn
@@ -246,46 +245,42 @@ class Newton:
         self.x = np.zeros((self.nt, nx), dtype=float)
         self.x[0] = x0
         nf = system.nu + system.nla_g + system.nla_S
-        self.__jac = np.zeros((nf, nx), dtype=float)
+
+        # allocate memory
+        self.__x = x0.copy()
+        self.__q = self.__x[: self.split_x[0]]
+        self.__la_g = self.__x[self.split_x[0] :]
+        self.system.connect_state(self.__q, self.__la_g)
+        self.__F = np.zeros(nf, dtype=float)
+        self.__h = self.__F[: self.split_f[0]]
+        self.__g = self.__F[self.split_f[0] : self.split_f[1]]
+        self.__g_S = self.__F[self.split_f[1] :]
+        self.__J = np.zeros((nf, nx), dtype=float)
+        self.__K = self.__J[: self.split_f[0], : self.split_x[0]]
+        self.__W_g = self.__J[: self.split_f[0], self.split_x[0] :]
+        self.__g_q = self.__J[self.split_f[0] : self.split_f[1], : self.split_x[0]]
+        self.__g_S_q = self.__J[self.split_f[1] :, : self.split_x[0]]
 
     def fun(self, x, t):
         # unpack unknowns
-        q, la_g = np.array_split(x, self.split_x)
-
+        self.__x[:] = x
+        la_g = x[self.split_x[0] :]
         # evaluate quantites that are required for computing the residual and
         # the jacobian
-        # csr is used for efficient matrix vector multiplication, see
-        # https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csr_array.html#scipy.sparse.csr_array
-        self.W_g = self.system.W_g(t, q)
+        self.__W_g[:] = self.system.W_g(t)
 
         # static equilibrium
-        F = np.zeros_like(x)
-
-        F[: self.split_f[0]] = self.system.h(t, q, self.u0) + self.W_g @ la_g
-        F[self.split_f[0] : self.split_f[1]] = self.system.g(t, q)
-        F[self.split_f[1] : self.split_f[2]] = self.system.g_S(t, q)
-        return F
+        self.__h[:] = self.system.h(t) + self.__W_g @ la_g
+        self.__g[:] = self.system.g(t)
+        self.__g_S[:] = self.system.g_S()
+        return self.__F
 
     def jac(self, x, t):
-        # unpack unknowns
-        q, la_g = np.array_split(x, self.split_x)
-
         # evaluate additionally required quantites for computing the jacobian
-        # coo is used for efficient bmat
-        K = self.system.h_q(t, q, self.u0) + self.system.Wla_g_q(t, q, la_g)
-        g_q = self.system.g_q(t, q)
-        g_S_q = self.system.g_S_q(t, q)
-
-        # self.__jac[:self.split_f[0],:self.split_x[0]] = K
-        # self.__jac[:self.split_f[0],self.split_x[0]:] = self.W_g
-        # self.__jac[self.split_f[0]:self.split_f[1],:self.split_x[0]] = g_q
-        # self.__jac[self.split_f[1]:,:self.split_x[0]] = g_S_q
-        # return self.__jac
-        # fmt: off
-        return bmat([[      K, self.W_g], 
-                     [    g_q,     None],
-                     [  g_S_q,     None]], format="csc")
-        # fmt: on
+        self.__K[:] = self.system.h_q(t) + self.system.Wla_g_q(t)
+        self.__g_q[:] = self.system.g_q(t)
+        self.__g_S_q[:] = self.system.g_S_q()
+        return self.__J
 
     def __pbar_text(self, force_iter, newton_iter, error):
         return (
@@ -330,9 +325,7 @@ class Newton:
                 )
 
             # solver step callback
-            self.x[i, : self.split_x[0]], _ = self.system.step_callback(
-                self.load_steps[i], self.x[i, : self.split_x[0]], self.u0
-            )
+            self.system.step_callback(self.load_steps[i], self.x[i, : self.split_x[0]])
 
             # warm start for next step; store solution as new initial guess
             if i < self.nt - 1:

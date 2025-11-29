@@ -26,22 +26,19 @@ class Force_line_distributed:
     #####################
     # equations of motion
     #####################
-    def h(self, t, q, u):
+    def h(self, t):
         h = np.zeros(self.rod.nu, dtype=np.float64)
 
         for i in range(self.rod.nquadrature):
             # extract reference state variables
-            qpi = self.rod.qp[i]
-            qwi = self.rod.qw[i]
-            Ji = self.rod.J[i]
+            qp = self.rod.quad_p[i]
+            qw = self.rod.quad_w[i]
+            J = self.rod.J[i]
 
             # compute local force vector
-            h_qp = self.force(t, qpi) * Ji * qwi
+            h_qp = self.force(t, qp) * J * qw
 
             # multiply local force vector with variation of centerline
             for node in range(self.rod.nnodes):
                 h[self.rod.nodalDOF_r[node]] += self.rod.N[i, node] * h_qp
         return h
-
-    # def h_q(self, t, q, u):
-    #     return None

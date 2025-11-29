@@ -50,38 +50,16 @@ class System:
         for contr in contrs:
             if not contr in self.contributions:
                 self.contributions.append(contr)
-                if not hasattr(contr, "name"):
-                    contr.name = "contr" + str(self.ncontr)
-
-                if contr.name in self.contributions_map:
-                    new_name = contr.name + "_contr" + str(self.ncontr)
-                    print(
-                        f"There is another contribution named '{contr.name}' which is already part of the system. Changed the name to '{new_name}' and added it to the system."
-                    )
-                    contr.name = new_name
-                self.contributions_map[contr.name] = contr
                 self.ncontr += 1
-            else:
-                raise ValueError(f"contribution {str(contr)} already added")
-
-    def get_contribution_list(self, contr):
-        return getattr(self, f"_{self.__class__.__name__}__{contr}_contr")
 
     def assemble(self):
         """Assembles the system, i.e., counts degrees of freedom, sets connectivities and assembles global initial state."""
         self.nq = 0
         self.nu = 0
         self.nla_g = 0
-        self.nla_gamma = 0
-        self.nla_c = 0
-        self.nla_tau = 0
-        self.ntau = 0
         self.nla_S = 0
-        self.nla_N = 0
-        self.nla_F = 0
         q0 = []
         u0 = []
-        self.constant_force_reservoir = False
 
         for p in properties:
             setattr(self, f"_{self.__class__.__name__}__{p}_contr", [])
@@ -124,83 +102,81 @@ class System:
         # call assembler callback: call methods that require first an assembly of the system
         self.assembler_callback()
 
-        # compute consisten initial conditions
+        #  initial conditions
         self.q0 = np.array(q0)
         self.u0 = np.array(u0)
-
-        # compute consistent initial conditions
-        # normalize quaternions etc.
-        q0, u0 = self.step_callback(self.t0, self.q0, self.u0)
         self.la_g0 = np.zeros(self.nla_g)
 
     def assembler_callback(self):
         for contr in self.__assembler_callback_contr:
             contr.assembler_callback()
 
-    def step_callback(self, t, q, u):
-        for contr in self.__step_callback_contr:
-            q[contr.qDOF], u[contr.uDOF] = contr.step_callback(
-                t, q[contr.qDOF], u[contr.uDOF]
-            )
-        return q, u
+    def step_callback(self, t, q):
+        pass
 
     #####################
     # equations of motion
     #####################
-    def h(self, t, q, u):
-        h = np.zeros(self.nu, dtype=np.common_type(q, u))
+    def h(self, t):
+        h = np.zeros(self.nu, dtype=np.float64)
         for contr in self.__h_contr:
-            h[contr.uDOF] += contr.h(t, q[contr.qDOF], u[contr.uDOF])
+            h[contr.uDOF] += contr.h(t)
         return h
 
-    def h_q(self, t, q, u):
+    def h_q(self, t):
         h_q = np.zeros((self.nu, self.nq))
         for contr in self.__h_q_contr:
-            h_q[np.ix_(contr.uDOF, contr.qDOF)] += contr.h_q(
-                t, q[contr.qDOF], u[contr.uDOF]
-            )
+            h_q[np.ix_(contr.uDOF, contr.qDOF)] += contr.h_q(t)
         return h_q
 
     #########################################
     # bilateral constraints on position level
     #########################################
-    def g(self, t, q):
-        g = np.zeros(self.nla_g, dtype=q.dtype)
+    def g(self, t):
+        g = np.zeros(self.nla_g, dtype=np.float64)
         for contr in self.__g_contr:
-            g[contr.la_gDOF] = contr.g(t, q[contr.qDOF])
+            g[contr.la_gDOF] = contr.g(t)
         return g
 
-    def g_q(self, t, q):
+    def g_q(self, t):
         g_q = np.zeros((self.nla_g, self.nq))
         for contr in self.__g_contr:
-            g_q[np.ix_(contr.la_gDOF, contr.qDOF)] += contr.g_q(t, q[contr.qDOF])
+            g_q[np.ix_(contr.la_gDOF, contr.qDOF)] += contr.g_q(t)
         return g_q
 
-    def W_g(self, t, q):
+    def W_g(self, t):
         W_g = np.zeros((self.nu, self.nla_g))
         for contr in self.__g_contr:
-            W_g[np.ix_(contr.uDOF, contr.la_gDOF)] += contr.W_g(t, q[contr.qDOF])
+            W_g[np.ix_(contr.uDOF, contr.la_gDOF)] += contr.W_g(t)
         return W_g
 
-    def Wla_g_q(self, t, q, la_g):
+    def Wla_g_q(self, t):
         Wla_g_q = np.zeros((self.nu, self.nq))
         for contr in self.__g_contr:
-            Wla_g_q[np.ix_(contr.uDOF, contr.qDOF)] += contr.Wla_g_q(
-                t, q[contr.qDOF], la_g[contr.la_gDOF]
-            )
+            Wla_g_q[np.ix_(contr.uDOF, contr.qDOF)] += contr.Wla_g_q(t)
         return Wla_g_q
 
     #####################################################
     # stabilization conditions for the kinematic equation
     #####################################################
-    def g_S(self, t, q):
-        g_S = np.zeros(self.nla_S, dtype=q.dtype)
+    def g_S(self):
+        g_S = np.zeros(self.nla_S, dtype=np.float64)
         for contr in self.__g_S_contr:
-            g_S[contr.la_SDOF] = contr.g_S(t, q[contr.qDOF])
+            g_S[contr.la_SDOF] = contr.g_S()
         return g_S
 
-    def g_S_q(self, t, q):
+    def g_S_q(self):
         g_S_q = np.zeros((self.nla_S, self.nq))
         for contr in self.__g_S_contr:
-            g_S_q[np.ix_(contr.la_SDOF, contr.qDOF)] += contr.g_S_q(t, q[contr.qDOF])
+            g_S_q[np.ix_(contr.la_SDOF, contr.qDOF)] += contr.g_S_q()
         return g_S_q
+
+    def connect_state(self, q, la_g):
+        for contr in self.contributions:
+            if hasattr(contr, "qDOF") and len(contr.qDOF) > 0:
+                contr.q = q[contr.qDOF[0] : contr.qDOF[-1] + 1]
+                assert np.shares_memory(contr.q, q)
+
+            if hasattr(contr, "la_gDOF") and len(contr.la_gDOF) > 0:
+                contr.la_g = la_g[contr.la_gDOF[0] : contr.la_gDOF[-1] + 1]
+                assert np.shares_memory(contr.la_g, la_g)

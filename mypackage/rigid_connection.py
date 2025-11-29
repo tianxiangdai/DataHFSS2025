@@ -75,7 +75,8 @@ class RigidConnection:
 
         self.A_IJ0 = A_IB10
 
-        B1_r_P1J0 = A_IB10.T @ (self.r_OJ0 - r_OP10)
+        # self.B1_r_P1J0 = A_IB10.T @ (self.r_OJ0 - r_OP10)
+        self.B1_r_P1J0 = None
         A_K1J0 = A_IB10.T @ self.A_IJ0
 
         # check for A_IB of subsystem 2
@@ -83,21 +84,13 @@ class RigidConnection:
             self.subsystem2.t0, self.subsystem2.q0[qDOF2], self.xi2
         )
 
-        if self.r_OJ0 is None:
-            self.r_OJ0 = r_OP20
-
-        if self.A_IJ0 is None:
-            self.A_IJ0 = A_IB20
-
-        B2_r_P2J0 = A_IB20.T @ (self.r_OJ0 - r_OP20)
+        self.B2_r_P2J0 = A_IB20.T @ (self.r_OJ0 - r_OP20)
         A_K2J0 = A_IB20.T @ self.A_IJ0
 
-        self.auxiliary_functions(B1_r_P1J0, B2_r_P2J0, A_K1J0, A_K2J0)
+        self.auxiliary_functions(A_K1J0, A_K2J0)
 
     def auxiliary_functions(
         self,
-        B1_r_P1B0,
-        B2_r_P2B0,
         A_K1B0=None,
         A_K2B0=None,
     ):
@@ -106,59 +99,21 @@ class RigidConnection:
 
         # auxiliary functions for subsystem 1
         self.r_OJ1 = lambda t, q: self.subsystem1.r_OP(
-            t, q[:nq1], self.xi1, B1_r_P1B0
+            t, q[:nq1], self.xi1, self.B1_r_P1J0
         )
         self.r_OJ1_q1 = lambda t, q: self.subsystem1.r_OP_q(
-            t, q[:nq1], self.xi1, B1_r_P1B0
+            t, q[:nq1], self.xi1, self.B1_r_P1J0
         )
-        self.v_J1 = lambda t, q, u: self.subsystem1.v_P(
-            t, q[:nq1], u[:nu1], self.xi1, B1_r_P1B0
+        self.J_J1 = lambda t, q: self.subsystem1.J_P(
+            t, q[:nq1], self.xi1, self.B1_r_P1J0
         )
-        self.v_J1_q1 = lambda t, q, u: self.subsystem1.v_P_q(
-            t, q[:nq1], u[:nu1], self.xi1, B1_r_P1B0
-        )
-        self.a_J1 = lambda t, q, u, u_dot: self.subsystem1.a_P(
-            t, q[:nq1], u[:nu1], u_dot[:nu1], self.xi1, B1_r_P1B0
-        )
-        self.a_J1_q1 = lambda t, q, u, u_dot: self.subsystem1.a_P_q(
-            t, q[:nq1], u[:nu1], u_dot[:nu1], self.xi1, B1_r_P1B0
-        )
-        self.a_J1_u1 = lambda t, q, u, u_dot: self.subsystem1.a_P_u(
-            t, q[:nq1], u[:nu1], u_dot[:nu1], self.xi1, B1_r_P1B0
-        )
-        self.J_J1 = lambda t, q: self.subsystem1.J_P(t, q[:nq1], self.xi1, B1_r_P1B0)
         self.J_J1_q1 = lambda t, q: self.subsystem1.J_P_q(
-            t, q[:nq1], self.xi1, B1_r_P1B0
+            t, q[:nq1], self.xi1, self.B1_r_P1J0
         )
         self.A_IJ1 = lambda t, q: self.subsystem1.A_IB(t, q[:nq1], self.xi1) @ A_K1B0
         self.A_IJ1_q1 = lambda t, q: np.einsum(
             "ijl,jk->ikl", self.subsystem1.A_IB_q(t, q[:nq1], self.xi1), A_K1B0
         )
-        self.Omega1 = lambda t, q, u: self.subsystem1.A_IB(
-            t, q[:nq1], self.xi1
-        ) @ self.subsystem1.B_Omega(t, q[:nq1], u[:nu1], self.xi1)
-        self.Omega1_q1 = lambda t, q, u: np.einsum(
-            "ijk,j->ik",
-            self.subsystem1.A_IB_q(t, q[:nq1], xi=self.xi1),
-            self.subsystem1.B_Omega(t, q[:nq1], u[:nu1], self.xi1),
-        ) + self.subsystem1.A_IB(t, q[:nq1], xi=self.xi1) @ self.subsystem1.B_Omega_q(
-            t, q[:nq1], u[:nu1], self.xi1
-        )
-
-        self.Psi1 = lambda t, q, u, u_dot: self.subsystem1.A_IB(
-            t, q[:nq1], self.xi1
-        ) @ self.subsystem1.B_Psi(t, q[:nq1], u[:nu1], u_dot[:nu1], self.xi1)
-        self.Psi1_q1 = lambda t, q, u, u_dot: np.einsum(
-            "ijk,j->ik",
-            self.subsystem1.A_IB_q(t, q[:nq1], xi=self.xi1),
-            self.subsystem1.B_Psi(t, q[:nq1], u[:nu1], u_dot[:nu1], self.xi1),
-        ) + self.subsystem1.A_IB(t, q[:nq1], xi=self.xi1) @ self.subsystem1.B_Psi_q(
-            t, q[:nq1], u[:nu1], u_dot[:nu1], self.xi1
-        )
-        self.Psi1_u1 = lambda t, q, u, u_dot: self.subsystem1.A_IB(
-            t, q[:nq1], xi=self.xi1
-        ) @ self.subsystem1.B_Psi_u(t, q[:nq1], u[:nu1], u_dot[:nu1], self.xi1)
-
         self.J_R1 = lambda t, q: self.subsystem1.A_IB(
             t, q[:nq1], self.xi1
         ) @ self.subsystem1.B_J_R(t, q[:nq1], self.xi1)
@@ -174,59 +129,21 @@ class RigidConnection:
 
         # auxiliary functions for subsystem 2
         self.r_OJ2 = lambda t, q: self.subsystem2.r_OP(
-            t, q[nq1:], self.xi2, B2_r_P2B0
+            t, q[nq1:], self.xi2, self.B2_r_P2J0
         )
         self.r_OJ2_q2 = lambda t, q: self.subsystem2.r_OP_q(
-            t, q[nq1:], self.xi2, B2_r_P2B0
+            t, q[nq1:], self.xi2, self.B2_r_P2J0
         )
-        self.v_J2 = lambda t, q, u: self.subsystem2.v_P(
-            t, q[nq1:], u[nu1:], self.xi2, B2_r_P2B0
+        self.J_J2 = lambda t, q: self.subsystem2.J_P(
+            t, q[nq1:], self.xi2, self.B2_r_P2J0
         )
-        self.v_J2_q2 = lambda t, q, u: self.subsystem2.v_P_q(
-            t, q[nq1:], u[nu1:], self.xi2, B2_r_P2B0
-        )
-        self.a_J2 = lambda t, q, u, u_dot: self.subsystem2.a_P(
-            t, q[nq1:], u[nu1:], u_dot[nu1:], self.xi2, B2_r_P2B0
-        )
-        self.a_J2_q2 = lambda t, q, u, u_dot: self.subsystem2.a_P_q(
-            t, q[nq1:], u[nu1:], u_dot[nu1:], self.xi2, B2_r_P2B0
-        )
-        self.a_J2_u2 = lambda t, q, u, u_dot: self.subsystem2.a_P_u(
-            t, q[nq1:], u[nu1:], u_dot[nu1:], self.xi2, B2_r_P2B0
-        )
-        self.J_J2 = lambda t, q: self.subsystem2.J_P(t, q[nq1:], self.xi2, B2_r_P2B0)
         self.J_J2_q2 = lambda t, q: self.subsystem2.J_P_q(
-            t, q[nq1:], self.xi2, B2_r_P2B0
+            t, q[nq1:], self.xi2, self.B2_r_P2J0
         )
         self.A_IJ2 = lambda t, q: self.subsystem2.A_IB(t, q[nq1:], self.xi2) @ A_K2B0
         self.A_IJ2_q2 = lambda t, q: np.einsum(
             "ijk,jl->ilk", self.subsystem2.A_IB_q(t, q[nq1:], self.xi2), A_K2B0
         )
-        self.Omega2 = lambda t, q, u: self.subsystem2.A_IB(
-            t, q[nq1:], self.xi2
-        ) @ self.subsystem2.B_Omega(t, q[nq1:], u[nu1:], self.xi2)
-        self.Omega2_q2 = lambda t, q, u: np.einsum(
-            "ijk,j->ik",
-            self.subsystem2.A_IB_q(t, q[nq1:], xi=self.xi2),
-            self.subsystem2.B_Omega(t, q[nq1:], u[nu1:], self.xi2),
-        ) + self.subsystem2.A_IB(t, q[nq1:], xi=self.xi2) @ self.subsystem2.B_Omega_q(
-            t, q[nq1:], u[nu1:], self.xi2
-        )
-
-        self.Psi2 = lambda t, q, u, u_dot: self.subsystem2.A_IB(
-            t, q[nq1:], self.xi2
-        ) @ self.subsystem2.B_Psi(t, q[nq1:], u[nu1:], u_dot[nu1:], self.xi2)
-        self.Psi2_q2 = lambda t, q, u, u_dot: np.einsum(
-            "ijk,j->ik",
-            self.subsystem2.A_IB_q(t, q[nq1:], xi=self.xi2),
-            self.subsystem2.B_Psi(t, q[nq1:], u[nu1:], u_dot[nu1:], self.xi2),
-        ) + self.subsystem2.A_IB(t, q[nq1:], xi=self.xi2) @ self.subsystem2.B_Psi_q(
-            t, q[nq1:], u[nu1:], u_dot[nu1:], self.xi2
-        )
-        self.Psi2_u2 = lambda t, q, u, u_dot: self.subsystem2.A_IB(
-            t, q[nq1:], xi=self.xi2
-        ) @ self.subsystem2.B_Psi_u(t, q[nq1:], u[nu1:], u_dot[nu1:], self.xi2)
-
         self.J_R2 = lambda t, q: self.subsystem2.A_IB(
             t, q[nq1:], self.xi2
         ) @ self.subsystem2.B_J_R(t, q[nq1:], self.xi2)
@@ -239,8 +156,9 @@ class RigidConnection:
             self.subsystem2.A_IB(t, q[nq1:], self.xi2),
             self.subsystem2.B_J_R_q(t, q[nq1:], self.xi2),
         )
-        
-    def g(self, t, q):
+
+    def g(self, t):
+        q = self.q
         g = np.zeros(self.nla_g, dtype=q.dtype)
         g[:3] = self.r_OJ2(t, q) - self.r_OJ1(t, q)
 
@@ -252,7 +170,8 @@ class RigidConnection:
 
         return g
 
-    def g_q(self, t, q):
+    def g_q(self, t):
+        q = self.q
         nq1 = self._nq1
         g_q = np.zeros((self.nla_g, self._nq), dtype=q.dtype)
 
@@ -272,7 +191,8 @@ class RigidConnection:
 
         return g_q
 
-    def W_g(self, t, q):
+    def W_g(self, t):
+        q = self.q
         nu1 = self._nu1
         W_g = np.zeros((self._nu, self.nla_g), dtype=q.dtype)
         W_g[:nu1, :3] = -self.J_J1(t, q).T
@@ -289,7 +209,9 @@ class RigidConnection:
 
         return W_g
 
-    def Wla_g_q(self, t, q, la_g):
+    def Wla_g_q(self, t):
+        q = self.q
+        la_g = self.la_g
         nq1 = self._nq1
         nu1 = self._nu1
         Wla_g_q = np.zeros((self._nu, self._nq), dtype=np.common_type(q, la_g))

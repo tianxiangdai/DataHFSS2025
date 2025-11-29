@@ -44,16 +44,19 @@ class Frame:
     def A_IB_q(self, t, q=None, xi=None):
         return np.array([]).reshape((3, 3, 0))
 
-    def r_OP(self, t, q=None, xi=None, B_r_CP=np.zeros(3)):
-        return self.r_OP__(t) + self.A_IB__(t) @ B_r_CP
+    def r_OP(self, t, q=None, xi=None, B_r_CP=None):
+        if B_r_CP is None:
+            return self.r_OP__(t)
+        else:
+            return self.r_OP__(t) + self.A_IB__(t) @ B_r_CP
 
-    def r_OP_q(self, t, q=None, xi=None, B_r_CP=np.zeros(3)):
+    def r_OP_q(self, t, q=None, xi=None, B_r_CP=None):
         return np.array([]).reshape((3, 0))
 
-    def J_P(self, t, q=None, xi=None, B_r_CP=np.zeros(3)):
+    def J_P(self, t, q=None, xi=None, B_r_CP=None):
         return np.array([]).reshape((3, 0))
 
-    def J_P_q(self, t, q, xi=None, B_r_CP=np.zeros(3)):
+    def J_P_q(self, t, q, xi=None, B_r_CP=None):
         return np.array([]).reshape((3, 0, 0))
 
     def B_J_R(self, t, q, xi=None):
