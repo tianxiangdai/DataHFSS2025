@@ -314,21 +314,22 @@ class __ModelBase(ABC):
         # ------------
         self.static_solver.set_load_steps(forces.shape[0] * force_steps)
         self.static_solver.verbose = verbose
-        self.sol = self.static_solver.solve(warm_start=warm_start)
+        sol = self.static_solver.solve(warm_start=warm_start)
         # ------------------------
         #   Solution Evaluation
         # ------------------------
         if ret_all_steps:
-            t, q, x = self.sol.t[1:], self.sol.q[1:], self.static_solver.x[1:]
+            self.t, self.q, self.la_g, self.x = sol.t[1:], sol.q[1:], sol.la_g[1:], self.static_solver.x[1:]
         else:
-            t, q, x = (
-                self.sol.t[force_steps::force_steps],
-                self.sol.q[force_steps::force_steps],
-                self.static_solver.x[force_steps::force_steps],
+            self.t, self.q, self.la_g, self.x = (
+                sol.t[force_steps::force_steps],
+                sol.q[force_steps::force_steps],
+                sol.la_g[force_steps::force_steps],
+                self.static_solver.x[force_steps::force_steps],                
             )
         if warm_start:
             self.force_init = forces[-1]
-        return self.__data_evaluation(t, q, eval_keys)
+        return self.__data_evaluation(self.t, self.q, eval_keys)
 
     def __data_evaluation(self, t, q, eval_keys):
         nt = len(t)
