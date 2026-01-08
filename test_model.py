@@ -1,8 +1,8 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-from mypackage.visualization import BackgroundPlotter
-from mypackage.models import (
+from mylibs.visualization import BackgroundPlotter
+from mylibs.models import (
     ModelParameter,
     S1T4ForceParallel,
     S1T4ForceCrossCCW,
