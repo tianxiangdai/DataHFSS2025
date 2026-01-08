@@ -25,10 +25,7 @@ def find_files(root_folder, starting=(), ending=()):
     return sorted(video_files)
 
 
-
-def sync_exp_data(
-    data_cam, data_ros, t0_step=0, dt_step=0, delay_cam=0.5
-):
+def sync_exp_data(data_cam, data_ros, t0_step=0, dt_step=0, delay_cam=0.5):
     assert t0_step >= delay_cam
     # camera data
     data_cam["t"] += delay_cam
@@ -136,9 +133,15 @@ for exp_dir in [
     "traj_lin_R50_theta28",
 ]:
     data_dir_ = path.join(data_dir, "Circular_Motion", exp_dir)
-    data_traj = np.load(find_files(data_dir_, "traj_", ".npy")[0], allow_pickle=True).item()
-    data_ros = np.load(find_files(data_dir_, "rosbag2_", ".npy")[0], allow_pickle=True).item()
-    data_cam = np.load(find_files(data_dir_, "Cam", "_track.npy")[0], allow_pickle=True).item()
+    data_traj = np.load(
+        find_files(data_dir_, "traj_", ".npy")[0], allow_pickle=True
+    ).item()
+    data_ros = np.load(
+        find_files(data_dir_, "rosbag2_", ".npy")[0], allow_pickle=True
+    ).item()
+    data_cam = np.load(
+        find_files(data_dir_, "Cam", "_track.npy")[0], allow_pickle=True
+    ).item()
     data_cam["t"] = np.arange(data_cam["r_OP"].shape[0]) / data_cam["fps"]
     sync_exp_data(data_cam, data_ros, t0_step=1, dt_step=2, delay_cam=0.5)
     data_ros["forces"][0] *= 0
@@ -151,9 +154,13 @@ for exp_dir in [
     # param.G_A = param.G_J = 2.28672004e5
     # model = S1T4ForceParallel(param=param)
     # r_OP, A_IB = model.apply_forces(data_ros.forces, eval_keys=["r_OP", "A_IB"], verbose= True)
-    data_pred = np.load(find_files(data_dir_, "pred_", ".npy")[0], allow_pickle=True).item()
+    data_pred = np.load(
+        find_files(data_dir_, "pred_", ".npy")[0], allow_pickle=True
+    ).item()
     data_cam["r_OP"] += data_pred["r_OP"][0] - data_cam["r_OP"][0]
-    data_cam["A_IB"] = data_pred["A_IB"][0].T @ (data_cam["A_IB"][0].T @ data_cam["A_IB"])
+    data_cam["A_IB"] = data_pred["A_IB"][0].T @ (
+        data_cam["A_IB"][0].T @ data_cam["A_IB"]
+    )
 
     #
     r_OP_traj.append(data_traj["r_OP"][15:105])

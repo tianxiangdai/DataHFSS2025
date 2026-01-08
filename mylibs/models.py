@@ -319,13 +319,18 @@ class __ModelBase(ABC):
         #   Solution Evaluation
         # ------------------------
         if ret_all_steps:
-            self.t, self.q, self.la_g, self.x = sol.t[1:], sol.q[1:], sol.la_g[1:], self.static_solver.x[1:]
+            self.t, self.q, self.la_g, self.x = (
+                sol.t[1:],
+                sol.q[1:],
+                sol.la_g[1:],
+                self.static_solver.x[1:],
+            )
         else:
             self.t, self.q, self.la_g, self.x = (
                 sol.t[force_steps::force_steps],
                 sol.q[force_steps::force_steps],
                 sol.la_g[force_steps::force_steps],
-                self.static_solver.x[force_steps::force_steps],                
+                self.static_solver.x[force_steps::force_steps],
             )
         if warm_start:
             self.force_init = forces[-1]
@@ -351,7 +356,8 @@ class __ModelBase(ABC):
             # transformation matrix
             if "A_IB" in eval_keys:
                 self.A_IB[i] = (
-                    last_node.A_IB(ti, qi[last_node.qDOF], xi=1) @ self.param.rod_A_IB0.T
+                    last_node.A_IB(ti, qi[last_node.qDOF], xi=1)
+                    @ self.param.rod_A_IB0.T
                 )
             # tendon length
             if "l_tendon" in eval_keys:

@@ -88,7 +88,9 @@ class Rod:
         )
 
         # quadrature points and weights
-        self.quad_p, self.quad_w = gaussian_quadrature(self.nquadrature, np.array([0, 1]))
+        self.quad_p, self.quad_w = gaussian_quadrature(
+            self.nquadrature, np.array([0, 1])
+        )
 
         xs = np.linspace(0, 1, self.nnodes)
         self.L_dLs = [lagrange_basis_with_derivative(xs, i) for i in range(self.nnodes)]

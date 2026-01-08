@@ -10,14 +10,16 @@ data_dir = "Experimental_data/Workspace"
 
 mm2pt = 72 / 25.4  # mm to points
 
+
 def cyl_coord(r_OP):
-    rho = np.linalg.norm(r_OP[:, :2], axis=1)+1e-15
+    rho = np.linalg.norm(r_OP[:, :2], axis=1) + 1e-15
     z = r_OP[:, 2]
     phi = np.arccos(r_OP[:, 0] / rho)
     phi[(r_OP[:, 1] < 0)] *= -1
-    phi[phi<-1e-3] += np.pi * 2
-    phi[rho<1e-6] = 0
+    phi[phi < -1e-3] += np.pi * 2
+    phi[rho < 1e-6] = 0
     return rho, z, phi
+
 
 ###########
 # load data
@@ -109,9 +111,6 @@ fig_alpha.subplots_adjust(left=-0.05)
 plt.legend()
 
 
-
-
-load = 0
 la_min = 0
 la_max = 50
 step = 11
@@ -121,14 +120,14 @@ step = 11
 # raw data
 file_path = path.join(
     data_dir,
-    f"workspace_samples_{la_min}_{la_max}_step_{step}_load_{load}.nc",
+    f"workspace_samples_{la_min}_{la_max}_step_{step}_load_0.nc",
 )
 data = load_dataset(file_path)
 # select data with unique mask
 unique_mask = np.loadtxt(
     path.join(
         data_dir,
-        f"unique_mask_{la_min}_{la_max}_step_{step}_load_{load}.csv",
+        f"unique_mask_{la_min}_{la_max}_step_{step}_load_0.csv",
     ),
     delimiter=",",
     dtype=bool,
@@ -141,7 +140,7 @@ la, r_OP, r_OP_la, A_IB = (
 )
 
 # alpha shape
-fig = plt.figure(f"Cartesian_{load}", layout="constrained")
+fig = plt.figure(f"Cartesian_0", layout="constrained")
 plt.subplot(2, 1, 1)
 plt.scatter(
     np.linalg.norm(r_OP_bound[:, :2], axis=1) * 1000,

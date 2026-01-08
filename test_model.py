@@ -1,13 +1,8 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-from mylibs.visualization import BackgroundPlotter
-from mylibs.models import (
-    ModelParameter,
-    S1T4ForceParallel,
-    S1T4ForceCrossCCW,
-    S1T4ForceCrossCW,
-)
+from mylibs.visualization import Plotter
+from mylibs.models import S1T4ForceCrossCW
 
 if __name__ == "__main__":
 
@@ -26,29 +21,20 @@ if __name__ == "__main__":
     # window_size = (540, 540)
     cam_view_angle = np.rad2deg(np.arctan(min(px, py) / 2 / fx) * 2)
 
-    pm = ModelParameter()
-    pm.poly_degree = 3
-    # pm.d_gamma_dot = 1e-3
-    # pm.d_kappa_dot = 1e-3
-    model = S1T4ForceCrossCW(param=pm)
-    # model.assemble()
-    plotter = BackgroundPlotter(
+    model = S1T4ForceCrossCW()
+    plotter = Plotter(
         model.system,
         window_size,
     )
     cam = plotter.camera
-    plotter.camera.view_angle = cam_view_angle
-    plotter.camera.disable_parallel_projection()
-    plotter.camera.position = r_OC
-    plotter.camera.focal_point = r_OF
-    plotter.camera.up = -e_y_cam
-    plotter.camera.clipping_range = (0.01, 1)
-    plotter.camera.zoom(zoom)
-    # plotter.show()
-    import cProfile
+    cam.SetViewAngle(cam_view_angle)
+    cam.SetPosition(*r_OC)
+    cam.SetFocalPoint(*r_OF)
+    cam.SetViewUp(*(-e_y_cam))
+    cam.SetClippingRange(0.01, 1)
+    cam.Zoom(zoom)
+    plotter.show()
 
-    prof = cProfile.Profile()
-    prof.enable()
     r_OP = model.apply_forces(
         np.array([50, 0, 0, 0]),
         eval_keys=["r_OP"],
@@ -56,11 +42,3 @@ if __name__ == "__main__":
         verbose=True,
         ret_all_steps=True,
     )
-    prof.disable()
-    prof.dump_stats("profile.prof")
-    np.save("test.npy", r_OP)
-    import compare_data
-
-    exit()
-
-    model.set_new_initial_state(sol.q[-1], sol.u[-1])

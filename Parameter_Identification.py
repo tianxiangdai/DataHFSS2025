@@ -15,6 +15,7 @@ from matplotlib import pyplot as plt
 
 data_dir = "Experimental_data/Parameter_Identification"
 
+
 def find_files(root_folder, starting=(), ending=()):
     """Find files with specified endings within a root folder"""
     video_files = []
@@ -336,7 +337,6 @@ def run_identification(
     )
 
 
-
 ###########
 # Load Data
 ###########
@@ -513,9 +513,7 @@ for (
     ).flatten()
     sel_bkwd = np.invert(sel_fwd)
 
-    plt.figure(
-        name, layout="constrained"
-    )
+    plt.figure(name, layout="constrained")
     for i in range(3):
         plt.subplot(2, 3, i + 1)
         plt.plot(f_mean, r_OP_model_k[:, i] * 1000, "-r", label="model")

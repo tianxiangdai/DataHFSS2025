@@ -14,9 +14,7 @@ class ForceTendon:
         self.subsystems = subsystem_list
         self.n_sys = len(subsystem_list)
         self.xis = self.n_sys * [0] if xi_list is None else xi_list
-        self.Bi_r_CPis = (
-            self.n_sys * [None] if B_r_CP_list is None else B_r_CP_list
-        )
+        self.Bi_r_CPis = self.n_sys * [None] if B_r_CP_list is None else B_r_CP_list
         self.connectivity = connectivity
 
     def assembler_callback(self):
@@ -37,13 +35,9 @@ class ForceTendon:
         self._nq = np.array(self._nq, int)
         self._nu = np.array(self._nu, int)
 
-        self.nq_val = [
-            np.arange(*self._nq[i : i + 2]) for i in range(self.n_sys)
-        ]
+        self.nq_val = [np.arange(*self._nq[i : i + 2]) for i in range(self.n_sys)]
 
-        self.nu_val = [
-            np.arange(*self._nu[i : i + 2]) for i in range(self.n_sys)
-        ]
+        self.nu_val = [np.arange(*self._nu[i : i + 2]) for i in range(self.n_sys)]
 
     def r_OPk(self, t, q, k):
         return self.subsystems[k].r_OP(
