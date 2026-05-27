@@ -72,6 +72,7 @@ class ModelParameter:
         self.visual_rod_body_nelement = 2**self.visual_rod_nonlinear_subdivision
         self.visual_rod_opacity = 0.5
         self.visual_marker_platform_opacity = 1
+        self.visual_coord_sys_opacity = 1
         self.visual_marker_opacity = 1
         self.visual_connector_opacity = 1
         self.visual_tendon_opacity = 1
@@ -203,7 +204,10 @@ class __ModelBase(ABC):
         for i in range(self.rod.nnodes):
             self.visual_twins.append(
                 VisualCoordSystem(
-                    self.rod, param.visual_len_axis_rod, xi=i / (self.rod.nnodes - 1)
+                    self.rod,
+                    param.visual_len_axis_rod,
+                    xi=i / (self.rod.nnodes - 1),
+                    opacity=param.visual_coord_sys_opacity,
                 )
             )
         self.visual_twins.append(
@@ -240,15 +244,15 @@ class __ModelBase(ABC):
                 opacity=param.visual_marker_platform_opacity,
             )
         )
-        # self.visual_twins.append(
-        #     VisualSTL(
-        #         self.system.origin,
-        #         path.join(path.dirname(__file__), "stl", "Ground_Platform.stl"),
-        #         scale=1e-3,
-        #         A_BM=np.diag(np.array([-1, 1, -1], dtype=np.float64),
-        #         color=param.color_ground_platform,
-        #     )
-        # )
+        self.visual_twins.append(
+            VisualSTL(
+                self.system.origin,
+                path.join(path.dirname(__file__), "stl", "Ground_Platform.stl"),
+                scale=1e-3,
+                A_BM=np.diag(np.array([-1, 1, -1], dtype=np.float64)),
+                color=param.color_ground_platform,
+            )
+        )
         self.visual_twins.append(
             VisualSTL(
                 self.system.origin,
@@ -266,7 +270,7 @@ class __ModelBase(ABC):
                 xi=1,
                 A_BM=self.param.rod_A_IB0.T,
                 B_r_CP=self.param.B_r_CP_top_platform,
-                opacity=param.visual_marker_platform_opacity,
+                opacity=param.visual_coord_sys_opacity,
             )
         )
         self.visual_twins.append(
@@ -314,7 +318,7 @@ class __ModelBase(ABC):
         # ------------
         self.static_solver.set_load_steps(forces.shape[0] * force_steps)
         self.static_solver.verbose = verbose
-        sol = self.static_solver.solve(warm_start=warm_start)
+        sol = self.sol = self.static_solver.solve(warm_start=warm_start)
         # ------------------------
         #   Solution Evaluation
         # ------------------------

@@ -2,11 +2,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from mylibs.visualization import Plotter
-from mylibs.models import S1T4ForceCrossCW
+from mylibs.models import S1T4ForceCrossCW, ModelParameter
 
 if __name__ == "__main__":
 
-    r_OC = np.array([0, -0.35, 0.1], float)
+    r_OC = np.array([0, -0.35, 0.2], float)
     # r_OC = np.array([0, -0.35, 0.15], float)
     r_OF = np.array([0, 0, 0.06], float)  # camera focal point
     e_x_cam = np.array([1, 0, 0], float)
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     window_size = (960, 540)
     # window_size = (540, 540)
     cam_view_angle = np.rad2deg(np.arctan(min(px, py) / 2 / fx) * 2)
-
+    
     model = S1T4ForceCrossCW()
     plotter = Plotter(
         model.system,
